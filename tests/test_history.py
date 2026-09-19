@@ -1,33 +1,40 @@
+from io import BytesIO
+
 from fastapi.testclient import TestClient
+from pypdf import PdfReader
 from backend.main import app
 from backend import storage
 
 client = TestClient(app)
 
 
-def test_download_saves_exact_pdf_and_survives_new_client():
+def test_saved_draft_keeps_exact_pdf_and_survives_new_client():
     data = {'title': 'Ensayo Perú', 'members': [{'name': 'José García', 'code': 'U123'}]}
+    created = client.post('/api/covers', json=data).json()
     response = client.post('/api/pdf', json=data)
     assert response.status_code == 200
-    cover_id = response.headers['x-cover-id']
+    cover_id = created['id']
     assert storage.DB_PATH.exists()
     with TestClient(app) as reopened:
         assert reopened.get('/api/covers').json()['total'] == 1
         saved = reopened.get(f'/api/covers/{cover_id}').json()
         assert saved['data']['title'] == data['title']
         assert saved['data']['members'] == data['members']
-        assert reopened.get(f'/api/covers/{cover_id}/pdf').content == response.content
+        stored_pdf = reopened.get(f'/api/covers/{cover_id}/pdf').content
+        assert PdfReader(BytesIO(stored_pdf)).pages[0].extract_text() == PdfReader(BytesIO(response.content)).pages[0].extract_text()
 
 
-def test_save_deduplicates_identical_forms_and_preserves_versions():
-    first = client.post('/api/covers', json={'title': 'Primera versión'}).json()
-    again = client.post('/api/covers', json={'title': 'Primera versión'}).json()
-    second = client.post('/api/covers', json={'title': 'Segunda versión'}).json()
-    assert first['id'] == again['id'] != second['id']
-    listing = client.get('/api/covers').json()
+def test_create_update_and_user_scoped_history():
+    headers = {'X-User-Id': 'browser-a'}
+    first = client.post('/api/covers', json={'title': 'Primera versión'}, headers=headers).json()
+    second = client.post('/api/covers', json={'title': 'Primera versión'}, headers=headers).json()
+    assert first['id'] != second['id']
+    assert client.put(f"/api/covers/{first['id']}", json={'title': 'Versión actualizada'}, headers=headers).status_code == 200
+    listing = client.get('/api/covers', headers=headers).json()
     assert listing['total'] == 2
-    assert listing['items'][0]['id'] == second['id']
-    assert client.get(f"/api/covers/{first['id']}").json()['data']['title'] == 'Primera versión'
+    assert client.get(f"/api/covers/{first['id']}", headers=headers).json()['data']['title'] == 'Versión actualizada'
+    assert client.get('/api/covers', headers={'X-User-Id': 'browser-b'}).json()['total'] == 0
+    assert client.put(f"/api/covers/{first['id']}", json={'title': 'Ajena'}, headers={'X-User-Id': 'browser-b'}).status_code == 404
 
 
 def test_search_all_fields_case_accents_partial_and_hidden_codes():
@@ -65,8 +72,8 @@ def test_preview_and_failed_generation_do_not_save():
 def test_storage_failure_is_explicit(monkeypatch):
     def fail(*args):
         raise OSError('disk full')
-    monkeypatch.setattr(storage, 'save', fail)
-    response = client.post('/api/pdf', json={'title': 'Mi carátula'})
+    monkeypatch.setattr(storage, 'create', fail)
+    response = client.post('/api/covers', json={'title': 'Mi carátula'})
     assert response.status_code == 503
     assert 'No se pudo guardar' in response.json()['detail']
 

@@ -1,15 +1,15 @@
 {
-  "course": "Lorem ipsum dolor sit amet",
-  "week": "Lorem ipsum",
-  "title": "Lorem ipsum dolor sit amet",
-  "subtitle": "Consectetur adipiscing elit",
-  "teacher": "Lorem Ipsum Dolor",
+  "course": "Introducción a la Vida Universitaria",
+  "week": "1",
+  "title": "Mi proyecto de vida universitaria",
+  "subtitle": "Metas, hábitos y estrategias para una formación profesional exitosa",
+  "teacher": "Rojas Cáceres, Mariana del Pilar",
   "city": "Lima",
-  "faculty": "Lorem ipsum dolor sit amet",
+  "faculty": "Ingeniería de Software",
   "members": [
     {
-      "name": "Lorem Ipsum, Dolor Sit",
-      "code": "U12345678"
+      "name": "Quispe Salazar, Valeria Fernanda",
+      "code": "U25314872"
     }
   ],
   "show_codes": true

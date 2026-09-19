@@ -7,7 +7,9 @@ client = TestClient(app)
 
 
 def test_docx_editable_a4_calibri_and_saved():
-    response = client.post('/api/docx', json={'title': 'Investigación del Perú', 'city': 'Lima', 'year': '2026', 'faculty': 'Ingeniería', 'members': [{'name': 'José García', 'code': 'U123'}]})
+    data = {'title': 'Investigación del Perú', 'city': 'Lima', 'year': '2026', 'faculty': 'Ingeniería', 'members': [{'name': 'José García', 'code': 'U123'}]}
+    cover_id = client.post('/api/covers', json=data).json()['id']
+    response = client.post('/api/docx', json=data)
     assert response.status_code == 200
     assert response.headers['content-type'] == DOCX_MIME
     doc = Document(BytesIO(response.content))
@@ -16,13 +18,13 @@ def test_docx_editable_a4_calibri_and_saved():
     assert doc.sections[0].left_margin.inches == 1
     text = '\n'.join(p.text for p in doc.paragraphs)
     assert 'Investigación del Perú' in text and 'José García - U123' in text
-    assert doc.sections[0].footer.paragraphs[0].text == 'Lima – 2026'
+    assert 'Lima - 2026' in text
+    assert doc.sections[0].footer.paragraphs[0].text == ''
     assert len(doc.inline_shapes) == 1
     for p in doc.paragraphs:
         for run in p.runs:
             if run.text:
                 assert run.font.name == 'Calibri' and run.font.size.pt == 11
-    cover_id = response.headers['x-cover-id']
     assert client.get(f'/api/covers/{cover_id}/docx').status_code == 200
     assert client.get(f'/api/covers/{cover_id}/pdf').status_code == 200
 

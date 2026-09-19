@@ -10,7 +10,7 @@ from backend.main import app, Cover, build_drawing, wrap
 client = TestClient(app)
 EXAMPLE = {
     "course": "Problemas y Desafíos en el Perú Actual",
-    "week": "SEMANA 4",
+    "week": "4",
     "title": "Ensayo del oncenio de Leguía",
     "subtitle": "¿Fue autoritario el Oncenio de Leguía?",
     "teacher": "Ana Cyntia, Lázaro Angulo",
@@ -33,7 +33,7 @@ def test_a4_single_page_embedded_calibri_and_accents():
     assert float(page.mediabox.width) == pytest.approx(595.276, abs=.01)
     assert float(page.mediabox.height) == pytest.approx(841.89, abs=.01)
     text = page.extract_text()
-    for expected in ['Leguía', '¿Fue autoritario', 'U26213758', 'ESTUDIANTES:', 'Lima']:
+    for expected in ['Leguía', '¿Fue autoritario', 'U26213758', 'Estudiantes:', 'Lima']:
         assert expected in text
     fonts = [f.get_object() for f in page['/Resources']['/Font'].values()]
     calibri = [f for f in fonts if 'Calibri' in str(f.get('/BaseFont'))]
@@ -44,21 +44,21 @@ def test_a4_single_page_embedded_calibri_and_accents():
 @pytest.mark.parametrize('data', [{}, {'members': []}, {'members': [{'name': '', 'code': ''}]}])
 def test_optional_fields_leave_no_labels(data):
     text = read_pdf(data).pages[0].extract_text()
-    assert 'DOCENTE:' not in text
-    assert 'ASIGNATURA:' not in text
-    assert 'ESTUDIANTE' not in text
+    assert 'Docente:' not in text
+    assert 'Asignatura:' not in text
+    assert 'Estudiante' not in text
 
 
 def test_hidden_codes_singular_and_no_dangling_separators():
     data = {**EXAMPLE, 'members': [EXAMPLE['members'][0]], 'show_codes': False, 'year': ''}
     text = read_pdf(data).pages[0].extract_text()
-    assert 'ESTUDIANTE:' in text and 'ESTUDIANTES:' not in text
+    assert 'Estudiante:' in text and 'Estudiantes:' not in text
     assert 'U26213758' not in text and ' - ' not in text and ' – ' not in text
 
 
 def test_code_only_member_is_kept_if_visible():
     assert 'U123' in read_pdf({'members': [{'code': 'U123'}]}).pages[0].extract_text()
-    assert 'ESTUDIANTE' not in read_pdf({'members': [{'code': 'U123'}], 'show_codes': False}).pages[0].extract_text()
+    assert 'Estudiante' not in read_pdf({'members': [{'code': 'U123'}], 'show_codes': False}).pages[0].extract_text()
 
 
 def test_svg_uses_font_independent_paths_and_safe_input():
@@ -75,9 +75,9 @@ def test_svg_uses_font_independent_paths_and_safe_input():
 
 def test_utp_identity_is_fixed():
     text = read_pdf({}).pages[0].extract_text()
-    assert 'Universidad Tecnológica del Perú' in text
+    assert 'UNIVERSIDAD TECNOLÓGICA DEL PERÚ' in text
     for data in [{'template': 'apa'}, {'institution': 'Otra universidad'}, {'show_logo': False}]:
-        assert 'Universidad Tecnológica del Perú' in read_pdf(data).pages[0].extract_text()
+        assert 'UNIVERSIDAD TECNOLÓGICA DEL PERÚ' in read_pdf(data).pages[0].extract_text()
         assert client.post('/api/preview', json=data).status_code == 200
 
 
@@ -104,27 +104,35 @@ def test_health():
     assert client.get('/api/health').json()['font'] == 'Calibri'
 
 
-def test_city_year_stay_at_bottom_and_delivery_date_is_ignored():
+def test_city_year_are_regular_content_and_delivery_date_is_ignored():
     from reportlab.graphics.shapes import String
     for members in [[], EXAMPLE['members']]:
         drawing = build_drawing(Cover(city='Lima', year='2026', members=members, date='NO MOSTRAR'))
         texts = [item for item in drawing.contents if isinstance(item, String)]
-        footer = next(item for item in texts if item.text == 'Lima – 2026')
-        assert footer.y == 75
-        assert all(item.y > 108 for item in texts if item is not footer)
+        location = next(item for item in texts if item.text == 'Lima - 2026')
+        assert location.y > 75
+        assert location is texts[-1]
         assert all('NO MOSTRAR' not in item.text for item in texts)
 
 
-def test_cover_order_and_fixed_paragraph_spacing():
+def test_cover_order_and_equitable_block_spacing():
     from reportlab.graphics.shapes import String
     drawing = build_drawing(Cover(**EXAMPLE, faculty='Ingeniería'))
     texts = sorted((item for item in drawing.contents if isinstance(item, String) and item.y > 108), key=lambda item: -item.y)
     positions = {item.text: item.y for item in texts}
-    expected = ['Universidad Tecnológica del Perú', 'Ingeniería', 'SEMANA 4',
-                'Ensayo del oncenio de Leguía', 'ASIGNATURA:',
-                'Problemas y Desafíos en el Perú Actual', 'DOCENTE:', 'ESTUDIANTES:']
+    expected = ['UNIVERSIDAD TECNOLÓGICA DEL PERÚ', 'Ingeniería', 'Semana 4',
+                'Ensayo del oncenio de Leguía', 'Asignatura:',
+                'Problemas y Desafíos en el Perú Actual', 'Docente:', 'Estudiantes:']
     assert [positions[text] for text in expected] == sorted((positions[text] for text in expected), reverse=True)
-    assert positions['Ingeniería'] - positions['SEMANA 4'] <= 44
+    internal_gap = positions['Semana 4'] - positions['Ensayo del oncenio de Leguía']
+    block_gaps = [
+        positions['¿Fue autoritario el Oncenio de Leguía?'] - positions['Asignatura:'],
+        positions['Problemas y Desafíos en el Perú Actual'] - positions['Docente:'],
+        positions['Ana Cyntia, Lázaro Angulo'] - positions['Estudiantes:'],
+    ]
+    assert internal_gap == 18
+    assert max(block_gaps) - min(block_gaps) < .01
+    assert min(block_gaps) > internal_gap * 2
 
 
 def test_prefilled_defaults_and_legacy_type_changes():

@@ -32,10 +32,8 @@ def build_docx(drawing, logo):
     p.paragraph_format.line_spacing = Pt(logo_height + 3)
     p.add_run().add_picture(image, width=Pt(275), height=Pt(logo_height))
     items = sorted((item for item in drawing.contents if isinstance(item, String)), key=lambda item: -item.y)
-    body_items = [item for item in items if item.y > 108]
-    footer_items = [item for item in items if item.y <= 108]
     previous_y = None
-    for item in body_items:
+    for item in items:
         if previous_y is not None:
             blank_lines = max(0, round((previous_y - item.y) / 18) - 1)
             for _ in range(blank_lines):
@@ -48,15 +46,6 @@ def build_docx(drawing, logo):
         run.font.name, run.font.size = 'Calibri', Pt(11)
         run.bold = item.fontName.endswith('-Bold')
         previous_y = item.y
-    if footer_items:
-        footer = section.footer.paragraphs[0]
-        footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        footer.paragraph_format.line_spacing = 1
-        for index, item in enumerate(footer_items):
-            if index:
-                footer.add_run().add_break()
-            run = footer.add_run(item.text)
-            run.font.name, run.font.size = 'Calibri', Pt(11)
     result = BytesIO()
     doc.save(result)
     return result.getvalue()

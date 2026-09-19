@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Response, Query
+from fastapi import FastAPI, Header, HTTPException, Response, Query
 import sqlite3
 from backend import storage
 from backend.word import build_docx
@@ -78,6 +78,14 @@ def clean(value: str) -> str:
     return " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", value).split())
 
 
+def format_week(value: str) -> str:
+    value = clean(value)
+    legacy = re.fullmatch(r"semana\s*(\d+)", value, re.IGNORECASE)
+    if legacy:
+        return f"Semana {legacy.group(1)}"
+    return f"Semana {value}" if value.isdigit() else value
+
+
 def wrap(value: str, bold=False) -> list[str]:
     value = clean(value)
     font = "Calibri-Bold" if bold else "Calibri"
@@ -114,17 +122,17 @@ def build_drawing(data: Cover) -> Drawing:
             blocks.append(lines)
 
     members = [m for m in data.members if clean(m.name) or (data.show_codes and clean(m.code))]
-    # Keep the cover in reading order. Each block is separated by one ordinary
-    # blank line instead of stretching the gaps to fill the page.
-    block((data.week, False), (data.title, True), (data.subtitle, False))
+    # Keep related lines together; the free vertical space between the fixed
+    # header and footer is distributed evenly around these blocks below.
+    block((format_week(data.week), False), (data.title, True), (data.subtitle, False))
     if clean(data.course):
-        block(("ASIGNATURA:", True), (data.course, False))
+        block(("Asignatura:", True), (data.course, False))
     if clean(data.teacher):
-        block(("DOCENTE:", True), (data.teacher, False))
+        block(("Docente:", True), (data.teacher, False))
     if members:
         names = [" - ".join(filter(None, [clean(m.name), clean(m.code) if data.show_codes else ""])) for m in members]
-        block(("ESTUDIANTE:" if len(members) == 1 else "ESTUDIANTES:", True), *[(n, False) for n in names])
-    footer = wrap(" – ".join(filter(None, [clean(data.city), clean(data.year)])))
+        block(("Estudiante:" if len(members) == 1 else "Estudiantes:", True), *[(n, False) for n in names])
+    block((" - ".join(filter(None, [clean(data.city), clean(data.year)])), False))
     start = 72.0
     if data.show_logo:
         mark = deepcopy(logo())
@@ -136,30 +144,28 @@ def build_drawing(data: Cover) -> Drawing:
         start += mark_height + 38
     line_height = 18
     # The university belongs to the fixed header, not the centered work details.
-    for value, bold in [(data.institution, True), (data.faculty, False)]:
+    for value, bold in [(data.institution.upper(), True), (data.faculty, False)]:
         for text in wrap(value, bold):
             drawing.add(String(width / 2, height - start - 11, text,
                                fontName="Calibri-Bold" if bold else "Calibri",
                                fontSize=11, textAnchor="middle"))
             start += line_height
     total = sum(len(b) * line_height for b in blocks)
-    gaps = max(0, len(blocks) - 1)
-    # Reserve the footer independently of the variable content above it.
-    footer_top = 75 + max(0, len(footer) - 1) * 22
-    available = height - (footer_top + 33 if footer else 72) - start
-    block_gap = line_height
-    header_gap = min(26, max(0, (available - total - gaps * block_gap) / 2))
-    if total + gaps * block_gap + header_gap > available:
+    available = height - 72 - start
+    free_space = available - total
+    if free_space < 0:
         raise ValueError("El contenido supera una página A4. Acorta el texto o quita algunos datos para mantener Calibri 11 y los márgenes.")
+    # Use one equal slot above, below and between every visible block. This
+    # avoids accumulating short covers at the top while remaining predictable
+    # when optional blocks appear or disappear.
+    block_gap = free_space / (len(blocks) + 1) if blocks else 0
+    header_gap = block_gap
     y = height - start - header_gap - 11
     for lines in blocks:
         for text, bold in lines:
             drawing.add(String(width / 2, y, text, fontName="Calibri-Bold" if bold else "Calibri", fontSize=11, textAnchor="middle"))
             y -= line_height
         y -= block_gap
-    for index, text in enumerate(footer):
-        drawing.add(String(width / 2, footer_top - index * 22, text,
-                           fontName="Calibri", fontSize=11, textAnchor="middle"))
     return drawing
 
 
@@ -211,8 +217,7 @@ def preview(data: Cover):
 @app.post("/api/pdf")
 def pdf(data: Cover):
     content = renderPDF.drawToString(drawing_or_error(data))
-    saved = save_cover(data, content)
-    return Response(content, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="caratula.pdf"', "Cache-Control": "no-store", "X-Cover-Id": saved['id']})
+    return Response(content, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="caratula.pdf"', "Cache-Control": "no-store"})
 
 
 DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -222,28 +227,38 @@ DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 def word(data: Cover):
     drawing = drawing_or_error(data)
     content = build_docx(drawing, logo())
-    saved = save_cover(data, renderPDF.drawToString(drawing))
     return Response(content, media_type=DOCX_MIME, headers={
-        'Content-Disposition': 'attachment; filename="caratula.docx"',
-        'Cache-Control': 'no-store', 'X-Cover-Id': saved['id']})
+        'Content-Disposition': 'attachment; filename="caratula.docx"', 'Cache-Control': 'no-store'})
 
 
-def save_cover(data, content):
+def create_cover(data, content, user_id):
     try:
-        return storage.save(data.model_dump(), content)
+        return storage.create(data.model_dump(), content, user_id)
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(503, "No se pudo guardar la carátula en este equipo. Comprueba el espacio disponible y vuelve a intentar.") from exc
 
 
 @app.post('/api/covers')
-def save(data: Cover):
-    return save_cover(data, renderPDF.drawToString(drawing_or_error(data)))
+def create_saved(data: Cover, x_user_id: str = Header('legacy', max_length=100)):
+    return create_cover(data, renderPDF.drawToString(drawing_or_error(data)), x_user_id)
+
+
+@app.put('/api/covers/{cover_id}')
+def update_saved(cover_id: str, data: Cover, x_user_id: str = Header('legacy', max_length=100)):
+    drawing = drawing_or_error(data)
+    try:
+        result = storage.update(cover_id, x_user_id, data.model_dump(), renderPDF.drawToString(drawing))
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(503, "No se pudo guardar la carátula en este equipo. Comprueba el espacio disponible y vuelve a intentar.") from exc
+    if result is None:
+        raise HTTPException(404, 'No se encontró esta carátula para el usuario actual.')
+    return result
 
 
 @app.get('/api/covers')
-def history(q: str = Query('', max_length=350), limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
+def history(q: str = Query('', max_length=350), limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), x_user_id: str = Header('legacy', max_length=100)):
     try:
-        return storage.list_covers(q, limit, offset)
+        return storage.list_covers(q, limit, offset, x_user_id)
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(503, "No se pudieron leer tus carátulas guardadas. Vuelve a intentar.") from exc
 
@@ -259,15 +274,17 @@ def saved_or_error(cover_id):
 
 
 @app.get('/api/covers/{cover_id}')
-def saved_data(cover_id: str):
+def saved_data(cover_id: str, x_user_id: str = Header('legacy', max_length=100)):
     result = saved_or_error(cover_id)
-    return {k: v for k, v in result.items() if k != 'pdf'}
+    public = {k: v for k, v in result.items() if k not in {'pdf', 'user_id'}}
+    public['owned'] = result['user_id'] == x_user_id
+    return public
 
 
 @app.delete('/api/covers/{cover_id}', status_code=204)
-def delete_saved(cover_id: str):
+def delete_saved(cover_id: str, x_user_id: str = Header('legacy', max_length=100)):
     try:
-        deleted = storage.delete(cover_id)
+        deleted = storage.delete(cover_id, x_user_id)
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(503, 'No se pudo eliminar la carátula. Vuelve a intentar.') from exc
     if not deleted:

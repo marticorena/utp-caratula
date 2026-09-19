@@ -40,21 +40,22 @@ Abre http://127.0.0.1:5173. Vite reenvía `/api` a FastAPI; no se necesitan perm
 - Asignatura de escritura libre y ciudades con selección rápida.
 - Plantilla exclusiva UTP, con institución fija y logo SVG siempre incluido.
 - Calibri 11 embebida en el PDF, márgenes de 2,54 cm y doble interlineado dentro de cada bloque. En UTP se ajusta el espacio entre bloques; nunca se reduce la fuente ni se recorta el contenido.
-- Vista previa con actualización automática y ampliación. Las respuestas antiguas se cancelan al seguir escribiendo. Un error de desbordamiento bloquea la descarga.
+- Vista previa con actualización automática y zoom persistente por navegador. Las respuestas antiguas se cancelan al seguir escribiendo. Un error de desbordamiento bloquea la descarga.
 - PDF vectorial con texto seleccionable y logo vectorial.
-- Historial local sin cuentas: Guardar o Descargar PDF conserva el formulario y su PDF exacto en SQLite. La vista previa no guarda. Los cambios sin guardar se pierden al recargar.
+- Historial local sin cuentas: cada carátula tiene un ID estable y sus cambios se guardan automáticamente en SQLite después de una pausa breve al escribir.
 - Búsqueda por todos los campos, incluso códigos ocultos, sin distinguir mayúsculas ni tildes. Las palabras se combinan para filtrar resultados.
-- Abrir carátulas anteriores para editar o volver a descargar el PDF original. Las versiones anteriores se conservan y guardar exactamente los mismos datos no crea duplicados.
-- «Compartir enlace» guarda la carátula y copia una URL que vuelve a abrirla en el editor. En localhost, el enlace funciona en este equipo y mientras se conserve la misma base de datos local.
+- Abrir carátulas anteriores para continuar editándolas o volver a descargar sus archivos.
+- «Compartir enlace» copia una URL de la carátula ya autoguardada. En localhost, el enlace funciona en este equipo y mientras se conserve la misma base de datos local.
 
 
 ## API
 
 - `GET /api/health`: comprueba el generador, logo y fuente.
 - `POST /api/preview`: JSON → SVG.
-- `POST /api/docx`: descarga una carátula Word editable y guarda sus datos en el historial.
-- `POST /api/pdf`: el mismo JSON → PDF descargable, guardado automáticamente.
-- `POST /api/covers`: guarda formulario y PDF sin descargar.
+- `POST /api/docx`: genera una carátula Word editable.
+- `POST /api/pdf`: el mismo JSON → PDF descargable.
+- `POST /api/covers`: crea una carátula con ID estable.
+- `PUT /api/covers/{id}`: actualiza el formulario y PDF de una carátula existente.
 - `GET /api/covers?q=texto&limit=20&offset=0`: historial con búsqueda y paginación.
 - `GET /api/covers/{id}`: recupera el formulario.
 - `GET /api/covers/{id}/pdf`: descarga el PDF exacto guardado.
@@ -66,7 +67,7 @@ Todos los campos tienen límites de longitud. Una petición inválida o un conte
 {
   "template": "utp",
   "course": "Problemas y Desafíos en el Perú Actual",
-  "week": "SEMANA 4",
+  "week": "4",
   "title": "Ensayo del oncenio de Leguía",
   "subtitle": "¿Fue autoritario el Oncenio de Leguía?",
   "teacher": "",
@@ -96,6 +97,6 @@ Para otro sistema operativo, configura `CALIBRI_FONT_DIR` con una carpeta que co
 
 ## Datos locales
 
-La base se crea automáticamente en `data/caratulas.sqlite3` (excluida de Git). Contiene los formularios y PDFs, persiste al reiniciar la API y no depende de la caché del navegador. Para una copia de seguridad, detén la app y copia ese archivo. No se utiliza una cuenta ni un servicio externo. Todos los navegadores que accedan a esta misma instancia local comparten el historial. Mantén el servidor en `127.0.0.1` para uso local. Las carátulas descargadas antes de incorporar el historial no se pueden recuperar automáticamente.
+La base se crea automáticamente en `data/caratulas.sqlite3` (excluida de Git). Contiene los formularios y PDFs y persiste al reiniciar la API. El navegador guarda en `localStorage` un identificador temporal, la carátula activa y el nivel de zoom; no se utiliza una cuenta ni un servicio externo. Para una copia de seguridad, detén la app y copia la base. Mantén el servidor en `127.0.0.1` para uso local.
 
 El DOCX usa Calibri 11, papel A4 y texto editable. El logo se incluye como PNG de alta resolución para compatibilidad con Word. El PDF original guardado se conserva; los DOCX se generan con el diseño vigente.
