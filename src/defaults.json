@@ -1,0 +1,16 @@
+{
+  "course": "Lorem ipsum dolor sit amet",
+  "week": "Lorem ipsum",
+  "title": "Lorem ipsum dolor sit amet",
+  "subtitle": "Consectetur adipiscing elit",
+  "teacher": "Lorem Ipsum Dolor",
+  "city": "Lima",
+  "faculty": "Lorem ipsum dolor sit amet",
+  "members": [
+    {
+      "name": "Lorem Ipsum, Dolor Sit",
+      "code": "U12345678"
+    }
+  ],
+  "show_codes": true
+}
