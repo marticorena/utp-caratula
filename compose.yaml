@@ -1,0 +1,18 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - cover-data:/app/data
+      - type: bind
+        source: ${CALIBRI_FONT_DIR:-C:/Windows/Fonts}
+        target: /fonts
+        read_only: true
+
+volumes:
+  cover-data:
