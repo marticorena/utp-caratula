@@ -1,6 +1,6 @@
-type Format = 'pdf' | 'docx';
+import type { CoverFileFormat } from './types';
 
-export async function chooseDestination(title: string, format: Format) {
+export async function chooseDestination(title: string, format: CoverFileFormat) {
   const name = `${title.replace(/[^\p{L}\p{N} -]/gu, '').trim().slice(0, 70) || 'caratula'}.${format}`;
   return async (blob: Blob) => {
     const url = URL.createObjectURL(blob);

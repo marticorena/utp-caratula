@@ -100,3 +100,9 @@ Para otro sistema operativo, configura `CALIBRI_FONT_DIR` con una carpeta que co
 La base se crea automáticamente en `data/caratulas.sqlite3` (excluida de Git). Contiene los formularios y PDFs y persiste al reiniciar la API. El navegador guarda en `localStorage` un identificador temporal, la carátula activa y el nivel de zoom; no se utiliza una cuenta ni un servicio externo. Para una copia de seguridad, detén la app y copia la base. Mantén el servidor en `127.0.0.1` para uso local.
 
 El DOCX usa Calibri 11, papel A4 y texto editable. El logo se incluye como PNG de alta resolución para compatibilidad con Word. El PDF original guardado se conserva; los DOCX se generan con el diseño vigente.
+
+## Arquitectura
+
+El backend separa el transporte HTTP (`main.py`), la validación (`models.py`), el motor de composición (`layout.py`), los casos de uso (`services.py`) y la persistencia SQLite (`storage.py`). `CoverService` depende de un protocolo de repositorio y recibe sus implementaciones en el constructor, por lo que el almacenamiento y el layout se pueden sustituir sin cambiar las rutas.
+
+En el frontend, `cover.ts` contiene las transformaciones puras entre el formulario y la API; `api.ts` concentra el contrato HTTP tipado. Los componentes de React conservan el estado y la interacción visual, sin duplicar serialización, URLs ni manejo de respuestas.

@@ -1,32 +1,19 @@
 import { chooseDestination, downloadCancelled } from './download';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArrowDownAZ, ArrowDownToLine, BookOpen, Check, FileText, FileType2, FolderOpen, Share2, Info, LoaderCircle, Plus, Printer, Trash2, GripVertical, Users, X, ZoomIn, ZoomOut } from 'lucide-react';
 import './styles.css';
-import defaults from './defaults.json';
 import History from './History';
-import type { Member, PersonName, Cover, StoredCover } from './types';
-
-const member = (): Member => ({ first_names: '', last_names: '', code: '', id: crypto.randomUUID() });
-const personFromStored = (name: string): PersonName => {
-  const comma = name.indexOf(',');
-  if (comma >= 0) return { last_names: name.slice(0, comma).trim(), first_names: name.slice(comma + 1).trim() };
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length < 2) return { first_names: words[0] || '', last_names: '' };
-  const surnameWords = words.length >= 3 ? 2 : 1;
-  return { first_names: words.slice(0, -surnameWords).join(' '), last_names: words.slice(-surnameWords).join(' ') };
-};
-const memberFromStored = ({ name, code }: { name: string; code: string }): Member => {
-  return { ...personFromStored(name), code, id: crypto.randomUUID() };
-};
-const personName = (person: PersonName) => [person.last_names.trim(), person.first_names.trim()].filter(Boolean).join(', ');
-const initial = (): Cover => ({ ...defaults, teacher: personFromStored(defaults.teacher), show_codes: true, year: String(new Date().getFullYear()), members: defaults.members.map(memberFromStored) });
-const emptyCover = (): Cover => ({ course: '', week: '', title: '', subtitle: '', teacher: { first_names: '', last_names: '' }, city: '', year: '', faculty: '', members: [], show_codes: true });
-const payload = (data: Cover) => ({ ...data, teacher: personName(data.teacher), show_codes: true, members: data.members.map(m => ({ name: personName(m), code: m.code })) });
-const compareBySurname = (a: Member, b: Member) => {
-  const options = { sensitivity: 'base', numeric: true } as const;
-  return a.last_names.localeCompare(b.last_names, 'es', options) || a.first_names.localeCompare(b.first_names, 'es', options);
-};
+import { CoverApi } from './api';
+import {
+  compareMembersBySurname,
+  coverFromStored,
+  createEmptyCover,
+  createInitialCover,
+  createMember,
+  toStoredCover,
+} from './cover';
+import type { Cover, StoredCover } from './types';
 const USER_ID_KEY = 'utp-caratula-user-id';
 const CURRENT_COVER_KEY = 'utp-caratula-current-cover-id';
 const SETTINGS_KEY = 'utp-caratula-settings';
@@ -46,19 +33,13 @@ const savedZoom = () => {
   } catch { return 100; }
 };
 
-async function apiError(response: Response) {
-  const body = await response.json().catch(() => ({}));
-  if (Array.isArray(body.detail)) return 'Hay datos que no son válidos. Revisa la longitud de los campos y vuelve a intentar.';
-  return typeof body.detail === 'string' ? body.detail : 'No se pudo generar la carátula. Revisa los datos e inténtalo otra vez.';
-}
-
 function Field({ label, value, onChange, placeholder, maxLength = 350, list, multiline = false, type = 'text', min, step }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; maxLength?: number; list?: string; multiline?: boolean; type?: React.HTMLInputTypeAttribute; min?: number; step?: number }) {
   const id = React.useId();
   return <div className="field"><label htmlFor={id}>{label}</label>{multiline ? <textarea id={id} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} maxLength={maxLength} rows={2} /> : <input id={id} type={type} min={min} step={step} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} maxLength={maxLength} list={list} autoComplete="off" />}</div>;
 }
 
 function App() {
-  const [data, setData] = useState<Cover>(initial);
+  const [data, setData] = useState<Cover>(createInitialCover);
   const [activeTab, setActiveTab] = useState(0);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<string | null>(null);
@@ -98,6 +79,7 @@ function App() {
   const [retry, setRetry] = useState(0);
   const [zoomLevel, setZoomLevel] = useState(savedZoom);
   const [userId] = useState(temporaryUserId);
+  const api = useMemo(() => new CoverApi(userId), [userId]);
   const [currentCoverId, setCurrentCoverId] = useState('');
   const [initialized, setInitialized] = useState(false);
   const imageUrl = useRef('');
@@ -110,9 +92,7 @@ function App() {
     setError('');
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch('/api/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload(data)), signal: controller.signal });
-        if (!response.ok) throw new Error(await apiError(response));
-        const blob = await response.blob();
+        const blob = await api.preview(toStoredCover(data), controller.signal);
         if (id !== requestId.current || controller.signal.aborted) return;
         const url = URL.createObjectURL(blob);
         if (imageUrl.current) URL.revokeObjectURL(imageUrl.current);
@@ -126,7 +106,7 @@ function App() {
       }
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [data, retry]);
+  }, [api, data, retry]);
 
   useEffect(() => () => { if (imageUrl.current) URL.revokeObjectURL(imageUrl.current); }, []);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 4000); return () => clearTimeout(timer); }, [notice]);
@@ -145,20 +125,16 @@ function App() {
   }, [downloadOpen]);
   useEffect(() => {
     const controller = new AbortController();
-    const headers = { 'X-User-Id': userId };
     const create = async (cover: Cover) => {
-      const response = await fetch('/api/covers', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(payload(cover)), signal: controller.signal });
-      if (!response.ok) throw new Error(await apiError(response));
-      return response.json();
+      return api.create(toStoredCover(cover), controller.signal);
     };
     const start = async () => {
       try {
         const sharedId = new URL(window.location.href).searchParams.get('cover');
         const savedId = sharedId || localGet(CURRENT_COVER_KEY);
         if (savedId) {
-          const response = await fetch(`/api/covers/${encodeURIComponent(savedId)}`, { headers, signal: controller.signal, cache: 'no-store' });
-          if (response.ok) {
-            const result = await response.json();
+          const result = await api.get(savedId, controller.signal);
+          if (result) {
             const opened = coverFromStored(result.data);
             if (sharedId && !result.owned) {
               const copy = await create(opened);
@@ -173,7 +149,7 @@ function App() {
             return;
           }
         }
-        const fresh = initial();
+        const fresh = createInitialCover();
         const created = await create(fresh);
         setData(fresh); setCurrentCoverId(created.id); localSet(CURRENT_COVER_KEY, created.id);
         setHistoryRevision(n => n + 1); setInitialized(true);
@@ -183,13 +159,11 @@ function App() {
     };
     start();
     return () => controller.abort();
-  }, [userId]);
+  }, [api]);
 
   async function persistCover(nextData = data, coverId = currentCoverId, signal?: AbortSignal) {
     if (!coverId) throw new Error('La carátula todavía no está lista para guardarse.');
-    const response = await fetch(`/api/covers/${encodeURIComponent(coverId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': userId }, body: JSON.stringify(payload(nextData)), signal });
-    if (!response.ok) throw new Error(await apiError(response));
-    return response.json();
+    return api.update(coverId, toStoredCover(nextData), signal);
   }
 
   useEffect(() => {
@@ -211,9 +185,7 @@ function App() {
     try {
       const writeFile = await chooseDestination(data.title || data.course || 'caratula', format);
       await persistCover();
-      const response = await fetch(`/api/${format}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload(data)) });
-      if (!response.ok) throw new Error(await apiError(response));
-      const message = await writeFile(await response.blob());
+      const message = await writeFile(await api.generate(toStoredCover(data), format));
       setHistoryRevision(n => n + 1);
       setNotice(message);
     } catch (e) { if (!downloadCancelled(e)) setError(e instanceof TypeError ? 'No se pudo descargar el archivo. Vuelve a intentar.' : (e as Error).message); }
@@ -231,9 +203,7 @@ function App() {
     setPrinting(true); setError('');
     try {
       await persistCover();
-      const response = await fetch('/api/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload(data)) });
-      if (!response.ok) throw new Error(await apiError(response));
-      const url = URL.createObjectURL(await response.blob());
+      const url = URL.createObjectURL(await api.generate(toStoredCover(data), 'pdf'));
       printWindow.onload = () => { printWindow.focus(); printWindow.print(); };
       printWindow.location.href = url;
       window.setTimeout(() => URL.revokeObjectURL(url), 300_000);
@@ -268,11 +238,6 @@ function App() {
     finally { setSharing(false); }
   }
 
-  function coverFromStored(saved: StoredCover): Cover {
-    const { course, week, title, subtitle, teacher, city, year, faculty, members } = saved;
-    return { course, week, title, subtitle, teacher: personFromStored(teacher), city, year, faculty, show_codes: true, members: members.map(memberFromStored) };
-  }
-
   function openSaved(saved: StoredCover, coverId: string) {
     setData(coverFromStored(saved)); setCurrentCoverId(coverId); localSet(CURRENT_COVER_KEY, coverId);
     setNotice('Carátula abierta en el editor.');
@@ -281,10 +246,8 @@ function App() {
   async function newCover() {
     setCreating(true); setError('');
     try {
-      const fresh = initial();
-      const response = await fetch('/api/covers', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': userId }, body: JSON.stringify(payload(fresh)) });
-      if (!response.ok) throw new Error(await apiError(response));
-      const created = await response.json();
+      const fresh = createInitialCover();
+      const created = await api.create(toStoredCover(fresh));
       setData(fresh); setCurrentCoverId(created.id); localSet(CURRENT_COVER_KEY, created.id); setActiveTab(0);
       setHistoryRevision(n => n + 1); setNotice('Nueva carátula creada.');
     } catch (cause) { setError(cause instanceof TypeError ? 'No se pudo crear una nueva carátula.' : (cause as Error).message); }
@@ -318,7 +281,7 @@ function App() {
         </section>
         <section className="form-section tab-panel" role="tabpanel" id="editor-panel-1" aria-labelledby="editor-tab-1" hidden={activeTab !== 1}>
           <div className="member-tools"><button type="button" className="sort-members" disabled={data.members.length < 2} onClick={() => {
-            set('members', [...data.members].sort(compareBySurname));
+            set('members', [...data.members].sort(compareMembersBySurname));
             setNotice('Integrantes ordenados alfabéticamente por apellido.');
           }}><ArrowDownAZ size={16}/> Por apellido</button></div>
           <div className="members-list">{data.members.map((m, i) => <div className={`member-card ${dragging === m.id ? 'member-dragging' : ''} ${dragTarget === m.id && dragging !== m.id ? 'member-drop-target' : ''}`} data-member-id={m.id} key={m.id} onDragEnter={event => {
@@ -346,9 +309,9 @@ function App() {
             if (to >= 0 && to < data.members.length) { reorderMember(m.id, data.members[to].id); setNotice(`Integrante movido a la posición ${to + 1}.`); }
           }}><GripVertical size={18}/></button><span><Users size={14}/> Integrante {i + 1}</span><button className="icon-button delete" onClick={() => set('members', data.members.filter(item => item.id !== m.id))} aria-label={`Eliminar integrante ${i + 1}`} title="Eliminar integrante"><Trash2 size={15}/></button></div><div className="member-name-fields"><Field label="Nombres" value={m.first_names} onChange={v => set('members', data.members.map(item => item.id === m.id ? { ...item, first_names: v } : item))} placeholder="Nombres" maxLength={120}/><Field label="Apellidos" value={m.last_names} onChange={v => set('members', data.members.map(item => item.id === m.id ? { ...item, last_names: v } : item))} placeholder="Apellidos" maxLength={120}/></div><Field label="Código (opcional)" value={m.code} onChange={v => set('members', data.members.map(item => item.id === m.id ? { ...item, code: v } : item))} placeholder="Código de estudiante" maxLength={30}/></div>)}</div>
           {!data.members.length && <p className="empty-members">Tu carátula no tendrá una sección de estudiantes.</p>}
-          <button className="add-member" disabled={data.members.length >= 30} onClick={() => set('members', [...data.members, member()])}><Plus size={17}/> {data.members.length >= 30 ? 'Límite de 30 integrantes' : 'Agregar integrante'}</button>
+          <button className="add-member" disabled={data.members.length >= 30} onClick={() => set('members', [...data.members, createMember()])}><Plus size={17}/> {data.members.length >= 30 ? 'Límite de 30 integrantes' : 'Agregar integrante'}</button>
         </section>
-        <div className="editor-bottom-actions"><button className="reset-button" onClick={() => { setData(initial()); setActiveTab(0); setNotice('Ejemplo cargado.'); }}><BookOpen size={14}/> Cargar ejemplo</button><button className="reset-button" onClick={() => { setData(emptyCover()); setActiveTab(0); setNotice('Se limpiaron todos los campos.'); }}><Trash2 size={14}/> Limpiar todo</button></div>
+        <div className="editor-bottom-actions"><button className="reset-button" onClick={() => { setData(createInitialCover()); setActiveTab(0); setNotice('Ejemplo cargado.'); }}><BookOpen size={14}/> Cargar ejemplo</button><button className="reset-button" onClick={() => { setData(createEmptyCover()); setActiveTab(0); setNotice('Se limpiaron todos los campos.'); }}><Trash2 size={14}/> Limpiar todo</button></div>
       </section>
       <section className="preview-panel" aria-label="Vista previa de la carátula"><div className="preview-sticky"><div className="preview-toolbar"><div className="preview-title"><span className="live-dot"/>Vista previa</div><div className="preview-toolbar-actions"><div className="toolbar-group" role="group" aria-label="Descarga e impresión"><div className="download-menu" ref={downloadMenu}><button className="toolbar-download icon-only" onClick={() => setDownloadOpen(open => !open)} disabled={status !== 'ready' || downloading || printing} aria-label="Descargar carátula" title="Descargar" aria-expanded={downloadOpen}>{downloading ? <LoaderCircle size={15} className="spin"/> : <ArrowDownToLine size={15}/>}</button>{downloadOpen && <div className="download-popover"><button onClick={() => download('pdf')}><FileType2 size={16}/> PDF</button><button onClick={() => download('docx')}><FileText size={16}/> DOCX</button></div>}</div><button className="toolbar-download" disabled={status !== 'ready' || downloading || printing} onClick={printCover}>{printing ? <LoaderCircle size={15} className="spin"/> : <Printer size={15}/>} Imprimir</button><button className="toolbar-download icon-only" disabled={status !== 'ready' || sharing || downloading || printing || !currentCoverId} onClick={share} aria-label="Compartir carátula" title="Compartir">{sharing ? <LoaderCircle className="spin" size={15}/> : <Share2 size={15}/>}</button></div><div className="toolbar-group toolbar-group-separated" role="group" aria-label="Nivel de ampliación"><div className="zoom-controls"><button onClick={() => setZoomLevel(level => Math.max(70, level - 10))} disabled={zoomLevel === 70} aria-label="Reducir zoom" title="Reducir zoom"><ZoomOut size={15}/></button><span aria-live="polite">{zoomLevel}%</span><button onClick={() => setZoomLevel(level => Math.min(240, level + 10))} disabled={zoomLevel === 240} aria-label="Aumentar zoom" title="Aumentar zoom"><ZoomIn size={15}/></button></div></div></div></div>
         <div className="page-stage" tabIndex={0} role="region" aria-label={`Vista previa centrada al ${zoomLevel}%`}><div className="paper" style={zoomLevel === 100 ? undefined : { width: `${4.6 * zoomLevel}px`, minWidth: `${4.6 * zoomLevel}px`, maxWidth: 'none' }} aria-busy={status === 'loading'}>{preview && <img src={preview} alt="Vista previa de tu carátula en formato A4" className={status !== 'ready' ? 'stale-preview' : ''}/>}<div className="paper-status" aria-live="polite">{status === 'loading' && <span><LoaderCircle className="spin" size={16}/>{preview ? 'Actualizando…' : 'Preparando tu página…'}</span>}{status === 'error' && <div className="preview-error"><Info size={24}/><strong>No se puede mostrar la vista previa</strong><p>{error}</p><button className="secondary-button" onClick={() => setRetry(n => n + 1)}>Volver a intentar</button></div>}</div></div></div>

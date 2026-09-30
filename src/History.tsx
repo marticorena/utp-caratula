@@ -1,16 +1,17 @@
 import { chooseDestination, downloadCancelled } from './download';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, FileText, LoaderCircle, Search, Trash2, X } from 'lucide-react';
-import type { StoredCover } from './types';
+import { CoverApi } from './api';
+import type { CoverFileFormat, HistoryEntry, StoredCover } from './types';
 
-type Entry = { id: string; title: string; course: string; created_at: string };
 type Props = { open: boolean; revision: number; userId: string; onClose: () => void; onOpen: (data: StoredCover, id: string) => void };
 
 export default function History({ open, revision, userId, onClose, onOpen }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const api = useMemo(() => new CoverApi(userId), [userId]);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
-  const [items, setItems] = useState<Entry[]>([]);
+  const [items, setItems] = useState<HistoryEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -24,20 +25,17 @@ export default function History({ open, revision, userId, onClose, onOpen }: Pro
     setLoading(true); setError('');
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/covers?${new URLSearchParams({ q: query, offset: String(page * 20) })}`, { headers: { 'X-User-Id': userId }, signal: controller.signal, cache: 'no-store' });
-        if (!response.ok) throw new Error('No se pudo cargar el historial. Vuelve a intentar.');
-        const result = await response.json();
+        const result = await api.list(query, page * 20, controller.signal);
         if (!controller.signal.aborted) { setItems(result.items); setTotal(result.total); setLoading(false); }
       } catch (e) { if (!controller.signal.aborted) { setError((e as Error).message); setLoading(false); } }
     }, 200);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [open, query, page, revision, retry, userId]);
+  }, [api, open, query, page, revision, retry]);
 
-  async function remove(entry: Entry) {
+  async function remove(entry: HistoryEntry) {
     setBusy(entry.id); setError(''); setFeedback('');
     try {
-      const response = await fetch(`/api/covers/${entry.id}`, { method: 'DELETE', headers: { 'X-User-Id': userId } });
-      if (!response.ok && response.status !== 404) throw new Error('No se pudo eliminar la carátula. Vuelve a intentar.');
+      await api.delete(entry.id);
       setFeedback(`Se eliminó «${entry.title}» del historial.`);
       if (items.length === 1 && page > 0) setPage(p => p - 1);
       setRetry(n => n + 1);
@@ -45,16 +43,15 @@ export default function History({ open, revision, userId, onClose, onOpen }: Pro
     finally { setBusy(''); }
   }
 
-  async function choose(entry: Entry, download: false | 'pdf' | 'docx') {
+  async function choose(entry: HistoryEntry, download: false | CoverFileFormat) {
     setBusy(entry.id); setError(''); setFeedback('');
     try {
       const writeFile = download ? await chooseDestination(entry.title, download) : null;
-      const response = await fetch(`/api/covers/${entry.id}${download ? `/${download}` : ''}`, { headers: { 'X-User-Id': userId }, cache: 'no-store' });
-      if (!response.ok) throw new Error('No se pudo abrir esta carátula. Vuelve a intentar.');
       if (download) {
-        setFeedback(await writeFile!(await response.blob()));
+        setFeedback(await writeFile!(await api.savedFile(entry.id, download)));
       } else {
-        const result = await response.json();
+        const result = await api.get(entry.id);
+        if (!result) throw new Error('No se encontró esta carátula.');
         onOpen(result.data, result.id); onClose();
       }
     } catch (e) { if (!downloadCancelled(e)) setError(e instanceof TypeError ? 'No se pudo descargar o abrir el archivo.' : (e as Error).message); }

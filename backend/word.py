@@ -1,6 +1,8 @@
-"""Editable Word cover using ordinary paragraphs and blank lines."""
-from io import BytesIO
+"""Editable Word cover generation."""
+
 from functools import lru_cache
+from io import BytesIO
+
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
@@ -9,6 +11,15 @@ from reportlab.graphics.shapes import String
 
 
 def build_docx(drawing, logo):
+    """Build an editable DOCX from the canonical cover drawing.
+
+    Args:
+        drawing: Positioned cover content from the layout engine.
+        logo: Vector UTP logo used to create the embedded bitmap fallback.
+
+    Returns:
+        Serialized DOCX file bytes.
+    """
     doc = Document()
     section = doc.sections[0]
     section.page_width, section.page_height = Pt(drawing.width), Pt(drawing.height)
@@ -31,7 +42,10 @@ def build_docx(drawing, logo):
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.line_spacing = Pt(logo_height + 3)
     p.add_run().add_picture(image, width=Pt(275), height=Pt(logo_height))
-    items = sorted((item for item in drawing.contents if isinstance(item, String)), key=lambda item: -item.y)
+    items = sorted(
+        (item for item in drawing.contents if isinstance(item, String)),
+        key=lambda item: -item.y,
+    )
     previous_y = None
     for item in items:
         if previous_y is not None:
