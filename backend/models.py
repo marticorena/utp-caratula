@@ -1,6 +1,6 @@
 """Validation models for UTP cover data."""
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -49,7 +49,7 @@ class Cover(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def normalize_legacy_identity(cls, value: Any) -> Any:
+    def normalize_legacy_identity(cls, value: object) -> object:
         """Accept old clients while enforcing the current UTP identity.
 
         Args:
@@ -68,3 +68,14 @@ class Cover(BaseModel):
             show_logo=True,
         )
         return normalized
+
+
+class SavedCoverResponse(BaseModel):
+    """Represent a saved cover returned to the browser."""
+
+    id: str
+    title: str
+    course: str
+    created_at: str
+    data: Cover
+    owned: bool

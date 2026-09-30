@@ -1,13 +1,19 @@
 """FastAPI transport layer for the UTP cover application."""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 import sqlite3
-from typing import Any, TypeVar
+from typing import TypeVar
 
-from fastapi import FastAPI, Header, HTTPException, Query, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
+from reportlab.graphics.shapes import Drawing
 
+from backend.contracts import (
+    CoverHistory,
+    CoverSummary,
+    SavedCoverRecord,
+)
 from backend.layout import (
     CoverLayoutEngine,
     build_drawing,
@@ -15,7 +21,7 @@ from backend.layout import (
     setup_fonts,
     wrap,
 )
-from backend.models import Cover, Member
+from backend.models import Cover, Member, SavedCoverResponse
 from backend.services import CoverService, DefaultCoverRepository
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,7 +43,10 @@ cover_service = CoverService(DefaultCoverRepository(), CoverLayoutEngine())
 
 
 @app.middleware("http")
-async def fresh_frontend(request: Any, call_next: Callable[..., Any]) -> Response:
+async def fresh_frontend(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
     """Prevent stale HTML while allowing normal asset caching."""
     response = await call_next(request)
     if "text/html" in response.headers.get("content-type", ""):
@@ -76,7 +85,7 @@ def generation_or_error(operation: Callable[[], T]) -> T:
         raise HTTPException(503, str(exc)) from exc
 
 
-def drawing_or_error(data: Cover) -> Any:
+def drawing_or_error(data: Cover) -> Drawing:
     """Build a drawing while preserving the legacy helper API."""
     return generation_or_error(lambda: cover_service.drawing(data))
 
@@ -106,7 +115,11 @@ def word(data: Cover) -> Response:
     return Response(content, media_type=DOCX_MIME, headers=DOCX_HEADERS)
 
 
-def create_cover(data: Cover, _content: bytes | None, user_id: str) -> dict[str, Any]:
+def create_cover(
+    data: Cover,
+    _content: bytes | None,
+    user_id: str,
+) -> CoverSummary:
     """Create a saved cover while preserving the legacy helper signature."""
     try:
         return cover_service.create(data, user_id)
@@ -126,7 +139,7 @@ def create_cover(data: Cover, _content: bytes | None, user_id: str) -> dict[str,
 def create_saved(
     data: Cover,
     x_user_id: str = Header("legacy", max_length=100),
-) -> dict[str, Any]:
+) -> CoverSummary:
     """Create a cover in the current browser history."""
     return create_cover(data, None, x_user_id)
 
@@ -136,7 +149,7 @@ def update_saved(
     cover_id: str,
     data: Cover,
     x_user_id: str = Header("legacy", max_length=100),
-) -> dict[str, Any]:
+) -> CoverSummary:
     """Update a cover owned by the current browser."""
     try:
         result = cover_service.update(cover_id, data, x_user_id)
@@ -164,7 +177,7 @@ def history(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     x_user_id: str = Header("legacy", max_length=100),
-) -> dict[str, Any]:
+) -> CoverHistory:
     """Return a paginated history for the current browser."""
     try:
         return cover_service.list(q, limit, offset, x_user_id)
@@ -175,7 +188,7 @@ def history(
         ) from exc
 
 
-def saved_or_error(cover_id: str) -> dict[str, Any]:
+def saved_or_error(cover_id: str) -> SavedCoverRecord:
     """Load a saved cover or translate repository failures to HTTP errors."""
     try:
         result = cover_service.get(cover_id)
@@ -193,16 +206,17 @@ def saved_or_error(cover_id: str) -> dict[str, Any]:
 def saved_data(
     cover_id: str,
     x_user_id: str = Header("legacy", max_length=100),
-) -> dict[str, Any]:
+) -> SavedCoverResponse:
     """Return public saved data and ownership information."""
     result = saved_or_error(cover_id)
-    public = {
-        key: value
-        for key, value in result.items()
-        if key not in {"pdf", "user_id"}
-    }
-    public["owned"] = result["user_id"] == x_user_id
-    return public
+    return SavedCoverResponse(
+        id=result["id"],
+        title=result["title"],
+        course=result["course"],
+        created_at=result["created_at"],
+        data=Cover.model_validate(result["data"]),
+        owned=result["user_id"] == x_user_id,
+    )
 
 
 @app.delete("/api/covers/{cover_id}", status_code=204)

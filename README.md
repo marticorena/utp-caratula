@@ -105,4 +105,4 @@ El DOCX usa Calibri 11, papel A4 y texto editable. El logo se incluye como PNG d
 
 El backend separa el transporte HTTP (`main.py`), la validación (`models.py`), el motor de composición (`layout.py`), los casos de uso (`services.py`) y la persistencia SQLite (`storage.py`). `CoverService` depende de un protocolo de repositorio y recibe sus implementaciones en el constructor, por lo que el almacenamiento y el layout se pueden sustituir sin cambiar las rutas.
 
-En el frontend, `cover.ts` contiene las transformaciones puras entre el formulario y la API; `api.ts` concentra el contrato HTTP tipado. Los componentes de React conservan el estado y la interacción visual, sin duplicar serialización, URLs ni manejo de respuestas.
+En el frontend, `cover.ts` contiene las transformaciones puras entre el formulario y la API; `api.ts` concentra el contrato HTTP tipado. `components/` separa campos, pestañas, integrantes, historial y vista previa mediante interfaces de props, mientras `hooks/` encapsula efectos con ciclo de vida propio. `main.tsx` queda como compositor y coordinador de los casos de uso, sin duplicar serialización, URLs ni manejo de respuestas.

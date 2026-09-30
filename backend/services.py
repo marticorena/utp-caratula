@@ -1,12 +1,18 @@
 """Application services that coordinate layout, files, and persistence."""
 
-from typing import Any, Protocol
+from typing import Protocol, cast
 
 from reportlab.graphics import renderPDF, renderSVG
-from reportlab.graphics.shapes import Drawing, String
+from reportlab.graphics.shapes import Drawing, Path, String
 from reportlab.graphics.utils import text2Path
 
 from backend import storage
+from backend.contracts import (
+    CoverData,
+    CoverHistory,
+    CoverSummary,
+    SavedCoverRecord,
+)
 from backend.layout import CoverLayoutEngine, logo
 from backend.models import Cover
 from backend.word import build_docx
@@ -17,19 +23,19 @@ class CoverRepository(Protocol):
 
     def create(
         self,
-        data: dict[str, Any],
+        data: CoverData,
         pdf: bytes,
         user_id: str,
-    ) -> dict[str, Any]:
+    ) -> CoverSummary:
         """Persist a new cover."""
 
     def update(
         self,
         cover_id: str,
         user_id: str,
-        data: dict[str, Any],
+        data: CoverData,
         pdf: bytes,
-    ) -> dict[str, Any] | None:
+    ) -> CoverSummary | None:
         """Replace an owned cover."""
 
     def list(
@@ -38,10 +44,10 @@ class CoverRepository(Protocol):
         limit: int,
         offset: int,
         user_id: str,
-    ) -> dict[str, Any]:
+    ) -> CoverHistory:
         """List covers owned by a user."""
 
-    def get(self, cover_id: str) -> dict[str, Any] | None:
+    def get(self, cover_id: str) -> SavedCoverRecord | None:
         """Load a cover by identifier."""
 
     def delete(self, cover_id: str, user_id: str) -> bool:
@@ -53,10 +59,10 @@ class DefaultCoverRepository:
 
     def create(
         self,
-        data: dict[str, Any],
+        data: CoverData,
         pdf: bytes,
         user_id: str,
-    ) -> dict[str, Any]:
+    ) -> CoverSummary:
         """Persist a new cover."""
         return storage.create(data, pdf, user_id)
 
@@ -64,9 +70,9 @@ class DefaultCoverRepository:
         self,
         cover_id: str,
         user_id: str,
-        data: dict[str, Any],
+        data: CoverData,
         pdf: bytes,
-    ) -> dict[str, Any] | None:
+    ) -> CoverSummary | None:
         """Replace an owned cover."""
         return storage.update(cover_id, user_id, data, pdf)
 
@@ -76,11 +82,11 @@ class DefaultCoverRepository:
         limit: int,
         offset: int,
         user_id: str,
-    ) -> dict[str, Any]:
+    ) -> CoverHistory:
         """List covers owned by a user."""
         return storage.list_covers(query, limit, offset, user_id)
 
-    def get(self, cover_id: str) -> dict[str, Any] | None:
+    def get(self, cover_id: str) -> SavedCoverRecord | None:
         """Load a cover by identifier."""
         return storage.get(cover_id)
 
@@ -115,7 +121,7 @@ class CoverService:
         """Build the canonical drawing for cover data."""
         return self._layout_engine.build(data)
 
-    def preview(self, data: Cover) -> bytes:
+    def preview(self, data: Cover) -> str:
         """Render a device-independent SVG preview."""
         drawing = self.drawing(data)
         drawing.contents = [
@@ -132,21 +138,22 @@ class CoverService:
         """Render an editable Word document."""
         return build_docx(self.drawing(data), logo())
 
-    def create(self, data: Cover, user_id: str) -> dict[str, Any]:
+    def create(self, data: Cover, user_id: str) -> CoverSummary:
         """Render and persist a new cover."""
-        return self._repository.create(data.model_dump(), self.pdf(data), user_id)
+        serialized = cast(CoverData, data.model_dump())
+        return self._repository.create(serialized, self.pdf(data), user_id)
 
     def update(
         self,
         cover_id: str,
         data: Cover,
         user_id: str,
-    ) -> dict[str, Any] | None:
+    ) -> CoverSummary | None:
         """Render and replace an owned cover."""
         return self._repository.update(
             cover_id,
             user_id,
-            data.model_dump(),
+            cast(CoverData, data.model_dump()),
             self.pdf(data),
         )
 
@@ -156,11 +163,11 @@ class CoverService:
         limit: int,
         offset: int,
         user_id: str,
-    ) -> dict[str, Any]:
+    ) -> CoverHistory:
         """List saved covers."""
         return self._repository.list(query, limit, offset, user_id)
 
-    def get(self, cover_id: str) -> dict[str, Any] | None:
+    def get(self, cover_id: str) -> SavedCoverRecord | None:
         """Load a saved cover."""
         return self._repository.get(cover_id)
 
@@ -169,7 +176,7 @@ class CoverService:
         return self._repository.delete(cover_id, user_id)
 
     @staticmethod
-    def _outline_text(item: String) -> Any:
+    def _outline_text(item: String) -> Path:
         """Convert one text node to paths for a portable SVG preview."""
         return text2Path(
             item.text,

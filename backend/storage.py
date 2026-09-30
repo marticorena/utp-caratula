@@ -6,13 +6,20 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import cast
 import unicodedata
 from uuid import uuid4
 
+from backend.contracts import (
+    CoverData,
+    CoverHistory,
+    CoverSummary,
+    JsonValue,
+    SavedCoverRecord,
+    StorageValues,
+)
+
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "caratulas.sqlite3"
-CoverData = dict[str, Any]
-CoverRecord = dict[str, Any]
 
 
 def normalize(text: str) -> str:
@@ -31,7 +38,7 @@ def normalize(text: str) -> str:
     )
 
 
-def searchable(value: Any) -> str:
+def searchable(value: JsonValue) -> str:
     """Flatten nested JSON-compatible data into searchable text.
 
     Args:
@@ -112,7 +119,7 @@ class SQLiteCoverRepository:
         user_id: str,
         data: CoverData,
         pdf: bytes,
-    ) -> tuple[Any, ...]:
+    ) -> StorageValues:
         """Convert domain data to the ordered database representation."""
         serialized = json.dumps(
             data,
@@ -120,13 +127,13 @@ class SQLiteCoverRepository:
             sort_keys=True,
             separators=(",", ":"),
         )
-        title = data.get("title") or data.get("course") or "Carátula sin título"
+        title = _text_value(data, "title") or _text_value(data, "course")
         return (
             cover_id,
             f"draft:{cover_id}",
             datetime.now(timezone.utc).isoformat(),
-            title,
-            data.get("course", ""),
+            title or "Carátula sin título",
+            _text_value(data, "course"),
             serialized,
             normalize(searchable(data)),
             pdf,
@@ -138,7 +145,7 @@ class SQLiteCoverRepository:
         data: CoverData,
         pdf: bytes,
         user_id: str = "legacy",
-    ) -> CoverRecord:
+    ) -> CoverSummary:
         """Create a cover and return its summary.
 
         Args:
@@ -167,7 +174,7 @@ class SQLiteCoverRepository:
                 "SELECT id, title, course, created_at FROM covers WHERE id = ?",
                 (cover_id,),
             ).fetchone()
-            return dict(row)
+            return _summary(row)
 
     def update(
         self,
@@ -175,7 +182,7 @@ class SQLiteCoverRepository:
         user_id: str,
         data: CoverData,
         pdf: bytes,
-    ) -> CoverRecord | None:
+    ) -> CoverSummary | None:
         """Replace an owned cover and return its summary when found.
 
         Args:
@@ -201,7 +208,7 @@ class SQLiteCoverRepository:
                 "SELECT id, title, course, created_at FROM covers WHERE id = ?",
                 (cover_id,),
             ).fetchone()
-            return dict(row)
+            return _summary(row)
 
     def list(
         self,
@@ -209,7 +216,7 @@ class SQLiteCoverRepository:
         limit: int,
         offset: int,
         user_id: str = "legacy",
-    ) -> dict[str, Any]:
+    ) -> CoverHistory:
         """Return a paginated, owner-scoped cover listing.
 
         Args:
@@ -238,9 +245,12 @@ class SQLiteCoverRepository:
                 ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?""",
                 [*parameters, limit, offset],
             ).fetchall()
-            return {"items": [dict(row) for row in rows], "total": total}
+            return {
+                "items": [_summary(row) for row in rows],
+                "total": int(total),
+            }
 
-    def get(self, cover_id: str) -> CoverRecord | None:
+    def get(self, cover_id: str) -> SavedCoverRecord | None:
         """Return a complete cover record by identifier.
 
         Args:
@@ -257,9 +267,7 @@ class SQLiteCoverRepository:
             ).fetchone()
             if row is None:
                 return None
-            result = dict(row)
-            result["data"] = json.loads(result["data"])
-            return result
+            return _saved_record(row)
 
     def delete(self, cover_id: str, user_id: str = "legacy") -> bool:
         """Delete an owned cover.
@@ -284,6 +292,32 @@ class SQLiteCoverRepository:
 _DEFAULT_REPOSITORY = SQLiteCoverRepository()
 
 
+def _text_value(data: CoverData, key: str) -> str:
+    """Return a cover value only when it is text."""
+    value = data.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def _summary(row: sqlite3.Row) -> CoverSummary:
+    """Convert a SQLite row to a statically typed cover summary."""
+    return {
+        "id": str(row["id"]),
+        "title": str(row["title"]),
+        "course": str(row["course"]),
+        "created_at": str(row["created_at"]),
+    }
+
+
+def _saved_record(row: sqlite3.Row) -> SavedCoverRecord:
+    """Convert a SQLite row to a complete typed record."""
+    return {
+        **_summary(row),
+        "data": cast(CoverData, json.loads(str(row["data"]))),
+        "pdf": bytes(row["pdf"]),
+        "user_id": str(row["user_id"]),
+    }
+
+
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
     """Open a connection using the default repository."""
@@ -296,7 +330,7 @@ def values(
     user_id: str,
     data: CoverData,
     pdf: bytes,
-) -> tuple[Any, ...]:
+) -> StorageValues:
     """Return storage values using the default repository."""
     return _DEFAULT_REPOSITORY._values(cover_id, user_id, data, pdf)
 
@@ -305,7 +339,7 @@ def create(
     data: CoverData,
     pdf: bytes,
     user_id: str = "legacy",
-) -> CoverRecord:
+) -> CoverSummary:
     """Create a cover using the default repository."""
     return _DEFAULT_REPOSITORY.create(data, pdf, user_id)
 
@@ -315,7 +349,7 @@ def update(
     user_id: str,
     data: CoverData,
     pdf: bytes,
-) -> CoverRecord | None:
+) -> CoverSummary | None:
     """Update a cover using the default repository."""
     return _DEFAULT_REPOSITORY.update(cover_id, user_id, data, pdf)
 
@@ -325,12 +359,12 @@ def list_covers(
     limit: int,
     offset: int,
     user_id: str = "legacy",
-) -> dict[str, Any]:
+) -> CoverHistory:
     """List covers using the default repository."""
     return _DEFAULT_REPOSITORY.list(query, limit, offset, user_id)
 
 
-def get(cover_id: str) -> CoverRecord | None:
+def get(cover_id: str) -> SavedCoverRecord | None:
     """Get a cover using the default repository."""
     return _DEFAULT_REPOSITORY.get(cover_id)
 
