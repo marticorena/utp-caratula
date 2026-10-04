@@ -7,16 +7,18 @@ from pathlib import Path
 import re
 
 from reportlab.graphics.shapes import Drawing, String
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from svglib.svglib import svg2rlg
 
 from backend.models import Cover
+from backend.formatting import FONTS, PAGES, FontPreset
 
 ROOT = Path(__file__).resolve().parent.parent
 FONT_SIZE = 11
-LINE_HEIGHT = 18
+LINE_HEIGHT = 26.84
+BLANK_LINE_HEIGHT = LINE_HEIGHT / 2
 PAGE_MARGIN = 72
 FONT_REGULAR = "Calibri"
 FONT_BOLD = "Calibri-Bold"
@@ -25,20 +27,21 @@ Block = list[Line]
 
 
 @lru_cache
-def setup_fonts() -> None:
+def setup_fonts(font_key: str = 'calibri') -> None:
     """Register the required Calibri font files with ReportLab.
 
     Raises:
         RuntimeError: If either required font file is unavailable.
     """
     font_dir = Path(os.environ.get("CALIBRI_FONT_DIR", "C:/Windows/Fonts"))
-    font_files = ((FONT_REGULAR, "calibri.ttf"), (FONT_BOLD, "calibrib.ttf"))
+    preset = FONTS[font_key]
+    font_files = ((preset.name, preset.regular_file), (preset.bold_name, preset.bold_file))
     for name, filename in font_files:
         path = font_dir / filename
         if not path.is_file():
             raise RuntimeError(
-                "No se encontró Calibri. Configura CALIBRI_FONT_DIR con "
-                "calibri.ttf y calibrib.ttf."
+                f"No se encontró {preset.name}. Configura CALIBRI_FONT_DIR con "
+                f"{preset.regular_file} y {preset.bold_file}."
             )
         pdfmetrics.registerFont(TTFont(name, str(path)))
 
@@ -81,8 +84,8 @@ def format_week(value: str) -> str:
     return f"Semana {normalized}" if normalized.isdigit() else normalized
 
 
-def wrap(value: str, bold: bool = False) -> list[str]:
-    """Wrap text to the printable A4 width, including unbroken strings.
+def wrap(value: str, bold: bool = False, *, preset: FontPreset = FONTS['calibri'], page_width: float = letter[0]) -> list[str]:
+    """Wrap text to the printable Letter width, including unbroken strings.
 
     Args:
         value: Plain text to wrap.
@@ -92,18 +95,18 @@ def wrap(value: str, bold: bool = False) -> list[str]:
         Lines whose rendered widths fit inside the page margins.
     """
     normalized = clean(value)
-    font = FONT_BOLD if bold else FONT_REGULAR
-    max_width = A4[0] - (PAGE_MARGIN * 2)
+    font = preset.bold_name if bold else preset.name
+    max_width = page_width - (PAGE_MARGIN * 2)
     lines: list[str] = []
     line = ""
 
     for word in normalized.split():
-        if line and _text_width(f"{line} {word}", font) > max_width:
+        if line and _text_width(f"{line} {word}", font, preset.size) > max_width:
             lines.append(line)
             line = ""
         for character in word:
             candidate = line + character
-            if line and _text_width(candidate, font) > max_width:
+            if line and _text_width(candidate, font, preset.size) > max_width:
                 lines.append(line.rstrip())
                 line = character
             else:
@@ -115,16 +118,16 @@ def wrap(value: str, bold: bool = False) -> list[str]:
     return lines
 
 
-def _text_width(value: str, font: str) -> float:
+def _text_width(value: str, font: str, size: int = FONT_SIZE) -> float:
     """Return the rendered width of text using the cover font."""
-    return pdfmetrics.stringWidth(value, font, FONT_SIZE)
+    return pdfmetrics.stringWidth(value, font, size)
 
 
 class CoverLayoutEngine:
     """Compose validated cover data into a ReportLab drawing."""
 
     def build(self, data: Cover) -> Drawing:
-        """Build an A4 cover drawing.
+        """Build a Letter cover drawing.
 
         Args:
             data: Validated cover content.
@@ -133,10 +136,15 @@ class CoverLayoutEngine:
             The composed vector drawing.
 
         Raises:
-            ValueError: If the content cannot fit on one A4 page.
+            ValueError: If the content cannot fit on one Letter page.
         """
-        setup_fonts()
-        width, height = A4
+        # Each request gets its own format; concurrent exports cannot mix presets.
+        self = CoverLayoutEngine()
+        self.preset = FONTS[data.font]
+        self.page_width, self.page_height = PAGES[data.page_size]
+        self.line_height = self.preset.line_height
+        setup_fonts(data.font)
+        width, height = self.page_width, self.page_height
         drawing = Drawing(width, height)
         blocks = self._content_blocks(data)
         content_start = self._add_logo(drawing, data, height, width)
@@ -144,8 +152,7 @@ class CoverLayoutEngine:
         self._add_blocks(drawing, blocks, content_start, height, width)
         return drawing
 
-    @staticmethod
-    def _content_blocks(data: Cover) -> list[Block]:
+    def _content_blocks(self, data: Cover) -> list[Block]:
         """Build semantic content blocks before positioning them."""
         blocks: list[Block] = []
 
@@ -158,7 +165,7 @@ class CoverLayoutEngine:
             lines = [
                 (line, bold)
                 for value, bold in entries
-                for line in wrap(value, bold)
+                for line in wrap(value, bold, preset=self.preset, page_width=self.page_width)
             ]
             if lines:
                 blocks.append(lines)
@@ -197,8 +204,8 @@ class CoverLayoutEngine:
         )
         return blocks
 
-    @staticmethod
     def _add_logo(
+        self,
         drawing: Drawing,
         data: Cover,
         page_height: float,
@@ -219,10 +226,10 @@ class CoverLayoutEngine:
             (page_height - PAGE_MARGIN - mark_height) / scale,
         )
         drawing.add(mark)
-        return start + mark_height + 38
+        return start + mark_height + self.line_height
 
-    @staticmethod
     def _add_header(
+        self,
         drawing: Drawing,
         data: Cover,
         start: float,
@@ -232,15 +239,15 @@ class CoverLayoutEngine:
         """Add the university header and return the next vertical offset."""
         entries = ((data.institution.upper(), True), (data.faculty, False))
         for value, bold in entries:
-            for text in wrap(value, bold):
+            for text in wrap(value, bold, preset=self.preset, page_width=self.page_width):
                 drawing.add(
-                    _centered_string(page_width, page_height - start - 11, text, bold)
+                    _centered_string(page_width, page_height - start - self.preset.size, text, bold, self.preset)
                 )
-                start += LINE_HEIGHT
+                start += self.line_height
         return start
 
-    @staticmethod
     def _add_blocks(
+        self,
         drawing: Drawing,
         blocks: list[Block],
         start: float,
@@ -248,31 +255,38 @@ class CoverLayoutEngine:
         page_width: float,
     ) -> None:
         """Distribute content blocks evenly in the remaining page area."""
-        content_height = sum(len(block) * LINE_HEIGHT for block in blocks)
-        free_space = page_height - PAGE_MARGIN - start - content_height
-        if free_space < 0:
+        content_height = sum(len(block) * self.line_height for block in blocks)
+        # Reserve one line for differences in inline-image and font metrics
+        # between Word and the vector renderer.
+        free_space = page_height - PAGE_MARGIN - start - content_height - self.line_height
+        if free_space < len(blocks) * (self.line_height / 2):
             raise ValueError(
-                "El contenido supera una página A4. Acorta el texto o quita "
-                "algunos datos para mantener Calibri 11 y los márgenes."
+                "El contenido supera una página. Acorta el texto, quita algunos datos "
+                "o selecciona A4 para mantener la fuente y los márgenes."
             )
 
-        block_gap = free_space / (len(blocks) + 1) if blocks else 0
-        y = page_height - start - block_gap - 11
+        # Whole blank lines can be represented by editable Enter paragraphs.
+        block_gap = (
+            max(1, int(free_space / len(blocks) / (self.line_height / 2)))
+            * (self.line_height / 2)
+            if blocks else 0
+        )
+        y = page_height - start - block_gap - self.preset.size
         for lines in blocks:
             for text, bold in lines:
-                drawing.add(_centered_string(page_width, y, text, bold))
-                y -= LINE_HEIGHT
+                drawing.add(_centered_string(page_width, y, text, bold, self.preset))
+                y -= self.line_height
             y -= block_gap
 
 
-def _centered_string(width: float, y: float, text: str, bold: bool) -> String:
+def _centered_string(width: float, y: float, text: str, bold: bool, preset: FontPreset = FONTS['calibri']) -> String:
     """Create a consistently styled, horizontally centered text node."""
     return String(
         width / 2,
         y,
         text,
-        fontName=FONT_BOLD if bold else FONT_REGULAR,
-        fontSize=FONT_SIZE,
+        fontName=preset.bold_name if bold else preset.name,
+        fontSize=preset.size,
         textAnchor="middle",
     )
 

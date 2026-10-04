@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sqlite3
 from typing import cast
@@ -290,6 +291,27 @@ class SQLiteCoverRepository:
 
 
 _DEFAULT_REPOSITORY = SQLiteCoverRepository()
+_POSTGRES_REPOSITORY = None
+
+
+def active_repository():
+    """Select persistent cloud storage without silently falling back to SQLite."""
+    global _POSTGRES_REPOSITORY
+    url = os.environ.get('DATABASE_URL', '').strip()
+    if url:
+        if _POSTGRES_REPOSITORY is None:
+            from backend.postgres import PostgresCoverRepository
+            _POSTGRES_REPOSITORY = PostgresCoverRepository(url)
+        return _POSTGRES_REPOSITORY
+    if os.environ.get('REQUIRE_DATABASE_URL') == '1':
+        raise OSError('Configura DATABASE_URL para guardar las carátulas en el hosting.')
+    return _DEFAULT_REPOSITORY
+
+
+def initialize():
+    repository = active_repository()
+    if hasattr(repository, 'initialize'):
+        repository.initialize()
 
 
 def _text_value(data: CoverData, key: str) -> str:
@@ -341,7 +363,7 @@ def create(
     user_id: str = "legacy",
 ) -> CoverSummary:
     """Create a cover using the default repository."""
-    return _DEFAULT_REPOSITORY.create(data, pdf, user_id)
+    return active_repository().create(data, pdf, user_id)
 
 
 def update(
@@ -351,7 +373,7 @@ def update(
     pdf: bytes,
 ) -> CoverSummary | None:
     """Update a cover using the default repository."""
-    return _DEFAULT_REPOSITORY.update(cover_id, user_id, data, pdf)
+    return active_repository().update(cover_id, user_id, data, pdf)
 
 
 def list_covers(
@@ -361,14 +383,14 @@ def list_covers(
     user_id: str = "legacy",
 ) -> CoverHistory:
     """List covers using the default repository."""
-    return _DEFAULT_REPOSITORY.list(query, limit, offset, user_id)
+    return active_repository().list(query, limit, offset, user_id)
 
 
 def get(cover_id: str) -> SavedCoverRecord | None:
     """Get a cover using the default repository."""
-    return _DEFAULT_REPOSITORY.get(cover_id)
+    return active_repository().get(cover_id)
 
 
 def delete(cover_id: str, user_id: str = "legacy") -> bool:
     """Delete a cover using the default repository."""
-    return _DEFAULT_REPOSITORY.delete(cover_id, user_id)
+    return active_repository().delete(cover_id, user_id)

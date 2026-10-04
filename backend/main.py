@@ -1,6 +1,7 @@
 """FastAPI transport layer for the UTP cover application."""
 
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 import sqlite3
 from typing import TypeVar
@@ -22,6 +23,8 @@ from backend.layout import (
     wrap,
 )
 from backend.models import Cover, Member, SavedCoverResponse
+from backend import storage
+from backend.formatting import FONTS
 from backend.services import CoverService, DefaultCoverRepository
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,7 +41,15 @@ DOCX_HEADERS = {
 }
 T = TypeVar("T")
 
-app = FastAPI(title="Carátula API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    storage.initialize()
+    for font_key in FONTS:
+        setup_fonts(font_key)
+    yield
+
+
+app = FastAPI(title="Carátula API", version="1.0.0", lifespan=lifespan)
 cover_service = CoverService(DefaultCoverRepository(), CoverLayoutEngine())
 
 
@@ -62,7 +73,13 @@ def health() -> dict[str, str]:
         logo()
     except (RuntimeError, OSError) as exc:
         raise HTTPException(503, str(exc)) from exc
-    return {"status": "ok", "font": "Calibri", "page": "A4"}
+    return {"status": "ok", "font": FONTS['calibri'].name, "page": "Carta"}
+
+
+@app.get('/api/formats')
+def formats():
+    return {'fonts': [{'value': key, 'label': f'{font.name} · {font.size} pt'}
+                      for key, font in FONTS.items()]}
 
 
 def generation_or_error(operation: Callable[[], T]) -> T:
@@ -130,8 +147,7 @@ def create_cover(
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(
             503,
-            "No se pudo guardar la carátula en este equipo. Comprueba el "
-            "espacio disponible y vuelve a intentar.",
+            "No se pudo guardar la carátula. Revisa la conexión y vuelve a intentar.",
         ) from exc
 
 
@@ -160,8 +176,7 @@ def update_saved(
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(
             503,
-            "No se pudo guardar la carátula en este equipo. Comprueba el "
-            "espacio disponible y vuelve a intentar.",
+            "No se pudo guardar la carátula. Revisa la conexión y vuelve a intentar.",
         ) from exc
     if result is None:
         raise HTTPException(
@@ -239,9 +254,11 @@ def delete_saved(
 
 @app.get("/api/covers/{cover_id}/pdf")
 def saved_pdf(cover_id: str) -> Response:
-    """Download the exact PDF stored with a cover."""
+    """Regenerate a PDF using the current layout and saved cover data."""
+    data = Cover.model_validate(saved_or_error(cover_id)["data"])
+    content = generation_or_error(lambda: cover_service.pdf(data))
     return Response(
-        saved_or_error(cover_id)["pdf"],
+        content,
         media_type="application/pdf",
         headers=PDF_HEADERS,
     )

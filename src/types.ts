@@ -11,6 +11,8 @@ export interface PersonName {
 }
 
 export interface Cover {
+  page_size: 'letter' | 'a4';
+  font: 'calibri' | 'arial' | 'times' | 'georgia';
   course: string;
   week: string;
   title: string;

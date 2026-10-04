@@ -122,6 +122,14 @@ export default function History({
     <dialog
       className="history-dialog"
       ref={dialog}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget || busyId) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (
+          event.clientX < bounds.left || event.clientX > bounds.right
+          || event.clientY < bounds.top || event.clientY > bounds.bottom
+        ) onClose();
+      }}
       onCancel={(event) => {
         if (busyId) event.preventDefault();
         else onClose();
@@ -131,7 +139,7 @@ export default function History({
       <div className="history-heading">
         <div>
           <h2 id="history-title">Mis carátulas</h2>
-          <p>Guardadas en este equipo. Sin cuentas.</p>
+          <p>Tus carátulas guardadas. Sin cuentas.</p>
         </div>
         <button
           disabled={Boolean(busyId)}

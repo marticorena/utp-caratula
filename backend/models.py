@@ -29,6 +29,8 @@ class Cover(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     template: Literal["utp"] = "utp"
+    page_size: Literal['letter', 'a4'] = 'letter'
+    font: Literal['calibri', 'arial', 'times', 'georgia'] = 'calibri'
     course: Text = ""
     week: ShortText = ""
     title: Text = ""

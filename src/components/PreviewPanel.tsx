@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import {
   ArrowDownToLine,
   FileText,
@@ -10,9 +10,13 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import type { CoverFileFormat, PreviewStatus } from '../types';
+import type { Cover, CoverFileFormat, PreviewStatus } from '../types';
 
 export interface PreviewPanelProps {
+  pageSize: Cover['page_size'];
+  font: Cover['font'];
+  onPageSizeChange: (value: Cover['page_size']) => void;
+  onFontChange: (value: Cover['font']) => void;
   imageUrl: string;
   status: PreviewStatus;
   previewError: string;
@@ -32,8 +36,22 @@ export interface PreviewPanelProps {
   onRetry: () => void;
 }
 
-/** Compose the preview toolbar, A4 canvas, status, and document metadata. */
+/** Compose the preview toolbar, Carta canvas, status, and document metadata. */
 export function PreviewPanel(props: PreviewPanelProps) {
+  const [fontOptions, setFontOptions] = useState([
+    { value: 'calibri', label: 'Calibri · 11 pt' },
+    { value: 'arial', label: 'Arial · 11 pt' },
+    { value: 'times', label: 'Times New Roman · 12 pt' },
+    { value: 'georgia', label: 'Georgia · 11 pt' },
+  ]);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/formats', { signal: controller.signal })
+      .then((response) => { if (!response.ok) throw new Error(); return response.json(); })
+      .then((formats) => setFontOptions(formats.fonts))
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
   const {
     imageUrl,
     status,
@@ -52,11 +70,28 @@ export function PreviewPanel(props: PreviewPanelProps) {
           status={status}
           error={previewError}
           zoom={zoom}
+          pageSize={props.pageSize}
           onRetry={onRetry}
         />
         <div className="paper-caption">
-          <span>A4 <span>210 × 297 mm</span></span>
-          <span>Calibri 11 <i /> Márgenes 2,54 cm</span>
+          <label className="format-choice">
+            <span>Papel</span>
+            <select aria-label="Tamaño de página" value={props.pageSize}
+              onChange={(event) => props.onPageSizeChange(event.target.value as Cover['page_size'])}>
+              <option value="letter">Carta · 215,9 × 279,4 mm</option>
+              <option value="a4">A4 · 210 × 297 mm</option>
+            </select>
+          </label>
+          <label className="format-choice">
+            <span>Fuente APA</span>
+            <select aria-label="Fuente y tamaño APA" value={props.font}
+              onChange={(event) => props.onFontChange(event.target.value as Cover['font'])}>
+              {fontOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <span className="fixed-margins">Márgenes 2,54 cm · Interlineado doble</span>
         </div>
         {actionError && (
           <p className="download-error" role="alert">{actionError}</p>
@@ -213,6 +248,7 @@ function ZoomControls({ zoom, onChange }: ZoomControlsProps) {
 }
 
 interface PreviewPageProps {
+  pageSize: Cover['page_size'];
   imageUrl: string;
   status: PreviewStatus;
   error: string;
@@ -221,16 +257,20 @@ interface PreviewPageProps {
 }
 
 function PreviewPage({
+  pageSize,
   imageUrl,
   status,
   error,
   zoom,
   onRetry,
 }: PreviewPageProps) {
-  const paperStyle = zoom === 100 ? undefined : {
+  const paperStyle = {
+    aspectRatio: pageSize === 'a4' ? '210 / 297' : '8.5 / 11',
+    ...(zoom === 100 ? {} : {
     width: `${4.6 * zoom}px`,
     minWidth: `${4.6 * zoom}px`,
     maxWidth: 'none',
+    }),
   };
 
   return (
@@ -248,7 +288,7 @@ function PreviewPage({
         {imageUrl && (
           <img
             src={imageUrl}
-            alt="Vista previa de tu carátula en formato A4"
+            alt={`Vista previa de tu carátula en formato ${pageSize === 'a4' ? 'A4' : 'carta'}`}
             className={status !== 'ready' ? 'stale-preview' : ''}
           />
         )}

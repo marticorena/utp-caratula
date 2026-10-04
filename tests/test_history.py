@@ -8,7 +8,7 @@ from backend import storage
 client = TestClient(app)
 
 
-def test_saved_draft_keeps_exact_pdf_and_survives_new_client():
+def test_saved_draft_regenerates_pdf_and_survives_new_client():
     data = {'title': 'Ensayo Perú', 'members': [{'name': 'José García', 'code': 'U123'}]}
     created = client.post('/api/covers', json=data).json()
     response = client.post('/api/pdf', json=data)
@@ -22,6 +22,19 @@ def test_saved_draft_keeps_exact_pdf_and_survives_new_client():
         assert saved['data']['members'] == data['members']
         stored_pdf = reopened.get(f'/api/covers/{cover_id}/pdf').content
         assert PdfReader(BytesIO(stored_pdf)).pages[0].extract_text() == PdfReader(BytesIO(response.content)).pages[0].extract_text()
+
+
+def test_saved_pdf_uses_current_format_instead_of_legacy_blob():
+    created = client.post('/api/covers', json={'title': 'Formato actualizado'}).json()
+    with storage.connection() as database:
+        database.execute('UPDATE covers SET pdf = ? WHERE id = ?',
+                         (b'legacy PDF', created['id']))
+    response = client.get(f"/api/covers/{created['id']}/pdf")
+    assert response.status_code == 200
+    page = PdfReader(BytesIO(response.content)).pages[0]
+    assert float(page.mediabox.width) == 612
+    assert float(page.mediabox.height) == 792
+    assert 'Formato actualizado' in page.extract_text()
 
 
 def test_create_update_and_user_scoped_history():

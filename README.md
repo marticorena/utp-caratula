@@ -2,7 +2,55 @@
 
 A UTP cover-page generator built with React, TypeScript, Tailwind CSS, and a FastAPI backend. ReportLab produces the PDF, while the SVG preview uses the exact same drawing, positions, and font metrics. Preview glyphs are converted to paths so Calibri renders consistently on devices where it is not installed; generated PDFs keep selectable text.
 
-## Run with Docker
+## Deploy free with Render and Neon
+
+The repository includes `render.yaml`: one free Docker web service, deploying
+automatically on every push to `main`, with `/api/health` as its health check.
+No GitHub deploy token or deploy hook is needed. Render must be connected to
+your GitHub account for automatic deploys to work.
+
+One-time setup:
+
+1. Create a free PostgreSQL project in [Neon](https://console.neon.tech).
+2. In Neon's **Connect** panel, copy the pooled PostgreSQL connection string;
+   keep `sslmode=require`. Treat this URL as a password; do not commit it.
+3. Push this commit to `main` on GitHub.
+4. In [Render](https://dashboard.render.com), choose **New → Blueprint**, connect
+   GitHub, and select `marticorena/utp-caratula`, branch `main`.
+5. Render reads `render.yaml`. Set `DATABASE_URL` to the Neon connection string
+   when prompted, confirm the **Free** plan, then deploy.
+6. Open the generated HTTPS `onrender.com` URL. Future pushes to `main` rebuild
+   and deploy the app automatically. Pushes to other branches do not deploy.
+
+The app uses Render's `PORT` automatically. It creates the PostgreSQL table and
+index at startup. Render requires `DATABASE_URL`, so a missing configuration
+cannot silently save drafts to an ephemeral local SQLite file. PostgreSQL stores
+the cover fields; PDF and DOCX are regenerated on download, reducing storage use.
+The existing local SQLite database is unchanged and is not automatically uploaded
+to Neon. History is associated with a browser identifier, not an account; another
+browser/device has its own history, and shared cover links allow opening a copy.
+
+Render's free service sleeps after 15 minutes without traffic. The first visit
+can take about a minute to wake it. Neon keeps the stored drafts across app
+restarts and deployments. See [Render's free limits](https://render.com/docs/free).
+
+### Fonts on the hosting platform
+
+`FONT_MODE=portable` is configured on Render. The image bundles open fonts:
+Carlito 11, Liberation Sans 11, Liberation Serif 12, and DejaVu Serif 11.
+The selector, preview, PDF, and Word use their real names consistently. These
+are open alternatives, not the original Microsoft fonts; DejaVu Serif is not
+metrically identical to Georgia. Letter/A4, 2.54 cm margins, double-spaced text,
+and editable blank Enter paragraphs stay available. For the exact Microsoft
+fonts, use `FONT_MODE=native` and provide appropriately licensed font files
+in `CALIBRI_FONT_DIR` on the server. Do not copy Windows fonts into this repo.
+
+The `.github/workflows/ci.yml` workflow checks the frontend, backend, real
+PostgreSQL persistence, and Docker build on pushes to `main` and pull requests.
+Render uses `autoDeployTrigger: commit`, so deployment starts with each push;
+CI results appear separately in GitHub.
+
+## Run locally with Docker
 
 Requirements:
 
@@ -15,6 +63,13 @@ On Windows, the default Compose configuration mounts the system Fonts directory 
 docker compose up --build -d
 docker compose ps
 ```
+
+For automatic rebuilds while editing, run `./iniciar-docker.ps1` on Windows
+or `docker compose up --build --watch`. Keep that terminal open. Compose Watch
+rebuilds and replaces the app when backend, frontend, logo, build configuration,
+or dependency files change. `docker compose up -d` and restarting a container
+alone do not enable watching. With an app already running, use
+`docker compose watch --no-up` in a separate terminal.
 
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000). View logs or stop the application with:
 
@@ -83,7 +138,7 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite proxies `/api` to Fast
 - Drag-and-drop student ordering, keyboard reordering with the arrow keys, and automatic sorting by surname.
 - Free-form course names and quick city suggestions.
 - A fixed UTP identity with the official institution name and SVG logo.
-- Embedded Calibri 11, 2.54 cm margins, and double line spacing within content blocks. Space between blocks adjusts automatically; text is never silently shrunk or clipped.
+- Select Letter paper (8.5 × 11 inches) or A4 for printing, and an APA font preset: Calibri 11, Arial 11, Times New Roman 12, or Georgia 11. Margins stay at 2.54 cm and text uses double line spacing. Format choices are saved with the draft and applied to SVG, PDF, and DOCX. Word separates blocks with editable single-spaced blank paragraphs (Enter), with zero spacing before and after paragraphs. The logo and field order retain the institutional UTP cover design.
 - Automatically refreshed previews and browser-persistent zoom. Obsolete requests are cancelled while the user continues typing. Overflow prevents invalid downloads.
 - Vector PDFs with selectable text and a vector logo.
 - Editable DOCX output using the same cover layout.
@@ -103,7 +158,7 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite proxies `/api` to Fast
 - `GET /api/covers?q=text&limit=20&offset=0`: search and paginate history.
 - `GET /api/covers/{id}`: retrieve saved form data.
 - `DELETE /api/covers/{id}`: delete an owned cover.
-- `GET /api/covers/{id}/pdf`: download the exact stored PDF.
+- `GET /api/covers/{id}/pdf`: regenerate a PDF from saved data using the current layout.
 - `GET /api/covers/{id}/docx`: generate an editable Word file from saved data using the current template.
 
 Every field has a length limit. Invalid requests and content that cannot fit on one page return HTTP 422. Missing Calibri files return HTTP 503 with configuration guidance. User text is always treated as plain text and is never interpreted as HTML or SVG markup.
@@ -132,7 +187,7 @@ Every field has a length limit. Invalid requests and content that cannot fit on 
 npm.cmd run build
 ```
 
-The suite verifies A4 dimensions, embedded fonts, single-page output, accented text, empty fields, hidden codes, student labels, safe SVG output, SVG/PDF consistency, fixed UTP identity, long-word wrapping, overflow rejection, storage, search, ownership, and editable Word output.
+The suite verifies Carta dimensions, embedded fonts, single-page output, accented text, empty fields, hidden codes, student labels, safe SVG output, SVG/PDF consistency, fixed UTP identity, long-word wrapping, overflow rejection, storage, search, ownership, and editable Word output.
 
 ## Architecture
 
@@ -152,4 +207,4 @@ Set `CALIBRI_FONT_DIR` to a directory containing licensed `calibri.ttf` and `cal
 
 Without Docker, the database is created at `data/caratulas.sqlite3`, which is excluded from Git. With Docker Compose, it is stored in the `cover-data` named volume. The browser stores a temporary user identifier, the active cover ID, and zoom preferences in `localStorage`; no account or external service is used.
 
-The stored PDF remains unchanged so it can be downloaded exactly as generated. DOCX files are regenerated from saved form data using the current layout and include a high-resolution PNG logo for compatibility with Word.
+PDF and DOCX downloads are regenerated from saved form data using the current layout, so older drafts also receive format corrections. DOCX files include a high-resolution PNG logo for compatibility with Word.

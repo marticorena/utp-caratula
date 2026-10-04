@@ -5,6 +5,35 @@ services:
       dockerfile: Dockerfile
     init: true
     restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      REQUIRE_DATABASE_URL: ${REQUIRE_DATABASE_URL:-0}
+      FONT_MODE: ${FONT_MODE:-native}
+    develop:
+      watch:
+        - action: rebuild
+          path: ./backend
+          ignore:
+            - __pycache__/
+            - '*.pyc'
+        - action: rebuild
+          path: ./src
+        - action: rebuild
+          path: ./public
+        - action: rebuild
+          path: ./package.json
+        - action: rebuild
+          path: ./package-lock.json
+        - action: rebuild
+          path: ./index.html
+        - action: rebuild
+          path: ./tsconfig.json
+        - action: rebuild
+          path: ./vite.config.ts
+        - action: rebuild
+          path: ./Dockerfile
+        - action: rebuild
+          path: ./.dockerignore
     ports:
       - "${PORT:-8000}:8000"
     volumes:

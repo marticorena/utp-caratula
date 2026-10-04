@@ -52,6 +52,8 @@ export function formatPersonName(person: PersonName): string {
 export function createInitialCover(): Cover {
   return {
     ...defaults,
+    page_size: 'letter',
+    font: 'calibri',
     teacher: personFromStored(defaults.teacher),
     show_codes: true,
     year: String(new Date().getFullYear()),
@@ -62,6 +64,8 @@ export function createInitialCover(): Cover {
 /** Create a cover with every optional field empty. */
 export function createEmptyCover(): Cover {
   return {
+    page_size: 'letter',
+    font: 'calibri',
     course: '',
     week: '',
     title: '',
@@ -91,6 +95,8 @@ export function toStoredCover(data: Cover): StoredCover {
 /** Convert API data into editable UI state. */
 export function coverFromStored(saved: StoredCover): Cover {
   return {
+    page_size: saved.page_size || 'letter',
+    font: saved.font || 'calibri',
     course: saved.course,
     week: saved.week,
     title: saved.title,

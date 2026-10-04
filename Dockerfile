@@ -38,7 +38,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libcairo2 \
+    && apt-get install --yes --no-install-recommends \
+        libcairo2 fonts-crosextra-carlito fonts-liberation2 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 10001 cover \
@@ -58,6 +59,6 @@ EXPOSE 8000
 VOLUME ["/app/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+    CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/api/health', timeout=3)"]
 
-CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "backend.run"]

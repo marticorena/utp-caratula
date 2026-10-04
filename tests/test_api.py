@@ -6,6 +6,7 @@ from pypdf import PdfReader
 import pytest
 
 from backend.main import app, Cover, build_drawing, wrap
+from backend.formatting import FONTS
 
 client = TestClient(app)
 EXAMPLE = {
@@ -26,17 +27,17 @@ def read_pdf(data):
     return PdfReader(BytesIO(response.content))
 
 
-def test_a4_single_page_embedded_calibri_and_accents():
+def test_letter_single_page_embedded_calibri_and_accents():
     pdf = read_pdf(EXAMPLE)
     assert len(pdf.pages) == 1
     page = pdf.pages[0]
-    assert float(page.mediabox.width) == pytest.approx(595.276, abs=.01)
-    assert float(page.mediabox.height) == pytest.approx(841.89, abs=.01)
+    assert float(page.mediabox.width) == pytest.approx(612, abs=.01)
+    assert float(page.mediabox.height) == pytest.approx(792, abs=.01)
     text = page.extract_text()
     for expected in ['Leguía', '¿Fue autoritario', 'U26213758', 'Estudiantes:', 'Lima']:
         assert expected in text
     fonts = [f.get_object() for f in page['/Resources']['/Font'].values()]
-    calibri = [f for f in fonts if 'Calibri' in str(f.get('/BaseFont'))]
+    calibri = [f for f in fonts if FONTS['calibri'].name in str(f.get('/BaseFont'))]
     assert len(calibri) >= 2
     assert all('/FontFile2' in f['/FontDescriptor'] for f in calibri)
 
@@ -83,7 +84,7 @@ def test_utp_identity_is_fixed():
 
 def test_overflow_is_rejected_in_preview_and_pdf():
     data = {**EXAMPLE, 'members': [{'name': ('Nombre Apellido ' * 7).strip()} for _ in range(30)]}
-    for endpoint in ['/api/preview', '/api/pdf']:
+    for endpoint in ['/api/preview', '/api/pdf', '/api/docx']:
         response = client.post(endpoint, json=data)
         assert response.status_code == 422
         assert 'supera una página' in response.json()['detail']
@@ -92,7 +93,7 @@ def test_overflow_is_rejected_in_preview_and_pdf():
 def test_unbroken_text_stays_inside_margins():
     from reportlab.pdfbase.pdfmetrics import stringWidth
     build_drawing(Cover())
-    assert all(stringWidth(line, 'Calibri', 11) <= 451.276 for line in wrap('A' * 350))
+    assert all(stringWidth(line, FONTS['calibri'].name, 11) <= 468 for line in wrap('A' * 350))
 
 
 @pytest.mark.parametrize('data', [{'title': 'a' * 351}, {'members': [{}] * 31}, {'unexpected': True}])
@@ -101,7 +102,7 @@ def test_invalid_input(data):
 
 
 def test_health():
-    assert client.get('/api/health').json()['font'] == 'Calibri'
+    assert client.get('/api/health').json()['font'] == FONTS['calibri'].name
 
 
 def test_city_year_are_regular_content_and_delivery_date_is_ignored():
@@ -130,9 +131,10 @@ def test_cover_order_and_equitable_block_spacing():
         positions['Problemas y Desafíos en el Perú Actual'] - positions['Docente:'],
         positions['Ana Cyntia, Lázaro Angulo'] - positions['Estudiantes:'],
     ]
-    assert internal_gap == 18
+    assert internal_gap == pytest.approx(26.84)
     assert max(block_gaps) - min(block_gaps) < .01
-    assert min(block_gaps) > internal_gap * 2
+    assert min(block_gaps) >= internal_gap * 1.5 - .01
+    assert all(gap / (internal_gap / 2) == pytest.approx(round(gap / (internal_gap / 2))) for gap in block_gaps)
 
 
 def test_prefilled_defaults_and_legacy_type_changes():

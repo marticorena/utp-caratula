@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: utp-caratula
+    runtime: docker
+    plan: free
+    branch: main
+    autoDeployTrigger: commit
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REQUIRE_DATABASE_URL
+        value: "1"
+      - key: FONT_MODE
+        value: portable

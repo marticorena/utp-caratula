@@ -334,6 +334,10 @@ export function App() {
           </div>
         </section>
         <PreviewPanel
+          pageSize={cover.page_size}
+          font={cover.font}
+          onPageSizeChange={(value) => setCoverField('page_size', value)}
+          onFontChange={(value) => setCoverField('font', value)}
           imageUrl={preview.imageUrl}
           status={preview.status}
           previewError={preview.error}

@@ -136,7 +136,7 @@ class CoverService:
 
     def docx(self, data: Cover) -> bytes:
         """Render an editable Word document."""
-        return build_docx(self.drawing(data), logo())
+        return build_docx(self.drawing(data), logo(), data.font)
 
     def create(self, data: Cover, user_id: str) -> CoverSummary:
         """Render and persist a new cover."""
