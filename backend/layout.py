@@ -38,6 +38,14 @@ def setup_fonts(font_key: str = 'calibri') -> None:
     font_files = ((preset.name, preset.regular_file), (preset.bold_name, preset.bold_file))
     for name, filename in font_files:
         path = font_dir / filename
+        if not path.is_file() and os.environ.get('FONT_MODE') == 'portable':
+            # Debian and Ubuntu package the same font files in different
+            # directories (liberation2 versus liberation).
+            path = next(
+                (candidate for candidate in Path('/usr/share/fonts').rglob(Path(filename).name)
+                 if candidate.is_file()),
+                path,
+            )
         if not path.is_file():
             raise RuntimeError(
                 f"No se encontró {preset.name}. Configura CALIBRI_FONT_DIR con "

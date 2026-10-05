@@ -35,6 +35,12 @@ jobs:
       TEST_DATABASE_URL: postgresql://cover_test:cover_test_only@localhost:5432/cover_test
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
