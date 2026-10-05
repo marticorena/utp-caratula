@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 
 from reportlab.lib.pagesizes import A4, letter
 
@@ -28,7 +29,8 @@ FONTS = {
     'times': FontPreset('Times New Roman', 12, 'times.ttf', 'timesbd.ttf'),
     'georgia': FontPreset('Georgia', 11, 'georgia.ttf', 'georgiab.ttf'),
 }
-if os.environ.get('FONT_MODE') == 'portable':
+BUNDLED_FONT_DIR = Path(__file__).resolve().parent.parent / 'fonts'
+if os.environ.get('FONT_MODE') == 'portable' and not BUNDLED_FONT_DIR.is_dir():
     FONTS = {
         'calibri': FontPreset('Carlito', 11, '/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf', '/usr/share/fonts/truetype/crosextra/Carlito-Bold.ttf'),
         'arial': FontPreset('Liberation Sans', 11, '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf', '/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf'),

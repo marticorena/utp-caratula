@@ -49,6 +49,7 @@ RUN groupadd --system --gid 10001 cover \
 COPY --from=python-builder /opt/venv /opt/venv
 COPY --chown=cover:cover backend ./backend
 COPY --chown=cover:cover public ./public
+COPY --chown=cover:cover fonts ./fonts
 COPY --from=frontend-builder --chown=cover:cover /build/dist ./dist
 
 RUN mkdir -p /app/data /fonts && chown -R cover:cover /app/data

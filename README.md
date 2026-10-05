@@ -36,14 +36,14 @@ restarts and deployments. See [Render's free limits](https://render.com/docs/fre
 
 ### Fonts on the hosting platform
 
-`FONT_MODE=portable` is configured on Render. The image bundles open fonts:
-Carlito 11, Liberation Sans 11, Liberation Serif 12, and DejaVu Serif 11.
-The selector, preview, PDF, and Word use their real names consistently. These
-are open alternatives, not the original Microsoft fonts; DejaVu Serif is not
-metrically identical to Georgia. Letter/A4, 2.54 cm margins, double-spaced text,
-and editable blank Enter paragraphs stay available. For the exact Microsoft
-fonts, use `FONT_MODE=native` and provide appropriately licensed font files
-in `CALIBRI_FONT_DIR` on the server. Do not copy Windows fonts into this repo.
+The image includes the original Calibri 11, Arial 11, Times New Roman 12,
+and Georgia 11 TTF files from `fonts/`. Preview, PDF, and Word use these fonts.
+Bundled fonts take precedence over the legacy `FONT_MODE=portable` setting,
+so existing Render services also switch to the originals on their next deploy.
+`render.yaml` configures `FONT_MODE=native` for new services.
+Letter/A4, 2.54 cm margins, double-spaced text, and editable blank Enter
+paragraphs remain available. These font files retain their original proprietary
+licenses; inclusion in this repository does not grant redistribution rights.
 
 The `.github/workflows/ci.yml` workflow checks the frontend, backend, real
 PostgreSQL persistence, and Docker build on pushes to `main` and pull requests.

@@ -13,7 +13,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from svglib.svglib import svg2rlg
 
 from backend.models import Cover
-from backend.formatting import FONTS, PAGES, FontPreset
+from backend.formatting import BUNDLED_FONT_DIR, FONTS, PAGES, FontPreset
 
 ROOT = Path(__file__).resolve().parent.parent
 FONT_SIZE = 11
@@ -33,7 +33,7 @@ def setup_fonts(font_key: str = 'calibri') -> None:
     Raises:
         RuntimeError: If either required font file is unavailable.
     """
-    font_dir = Path(os.environ.get("CALIBRI_FONT_DIR", "C:/Windows/Fonts"))
+    font_dir = BUNDLED_FONT_DIR if BUNDLED_FONT_DIR.is_dir() else Path(os.environ.get("CALIBRI_FONT_DIR", "C:/Windows/Fonts"))
     preset = FONTS[font_key]
     font_files = ((preset.name, preset.regular_file), (preset.bold_name, preset.bold_file))
     for name, filename in font_files:
